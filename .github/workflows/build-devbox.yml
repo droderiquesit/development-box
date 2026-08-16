@@ -90,8 +90,15 @@ jobs:
 
       - name: log in to the registry
         run: |
+          # Both keychains, deliberately: podman writes containers/auth.json,
+          # which podman and skopeo read — but cosign uses go-containerregistry,
+          # which reads the DOCKER keychain (~/.docker/config.json). With only
+          # podman login, the push succeeds and the signing step then fails
+          # UNAUTHORIZED on the very image that was just pushed.
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
 
       # -----------------------------------------------------------------------
       # Resolve the base. Pull the pinned release; do not rebuild it.
