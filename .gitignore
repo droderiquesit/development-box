@@ -87,7 +87,13 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+# Lockfiles from *user* projects living under /workspace are noise here — this
+# repository is not a Node application. The one exception is .github/tooling,
+# whose lockfile is the whole point: it is what lets CI run `npm ci` and get a
+# byte-identical, pinned linter every time instead of whatever npm resolved
+# that morning.
 package-lock.json
+!.github/tooling/package-lock.json
 yarn.lock
 pnpm-lock.yaml
 lerna-debug.log*

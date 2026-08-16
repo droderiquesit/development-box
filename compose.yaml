@@ -40,11 +40,20 @@ services:
   # The DevBox itself. This is the container VS Code attaches to.
   # ---------------------------------------------------------------------------
   devbox:
+    # Default to the PUBLISHED image: `docker compose up` should not cost 25
+    # minutes of local build the first time someone tries this.
+    #   published (default) : DEVBOX_IMAGE unset -> ghcr.io/<owner>/development-box:latest
+    #   pin a release       : DEVBOX_IMAGE=ghcr.io/<owner>/development-box:1.0.0
+    #   build locally       : docker compose build devbox   (or `make build`)
+    # The build: block below is what `compose build` uses; it is not run on `up`
+    # unless the image is missing locally AND cannot be pulled.
     build:
       context: .
       dockerfile: Containerfile
       args:
-        BASE_IMAGE_REF: ${DEVBOX_BASE_IMAGE:-ai-devbox-base:latest}
+        # Same rule as CI: build FROM the published, pinned base rather than
+        # rebuilding it. Keep this in step with release.base in versions.yaml.
+        BASE_IMAGE_REF: ${DEVBOX_BASE_IMAGE:-ghcr.io/droderiquesit/development-box-base:1.0.0}
         DEV_UID: ${DEV_UID:-1000}
         DEV_GID: ${DEV_GID:-1000}
         FEATURE_CLOUD_AWS: ${FEATURE_CLOUD_AWS:-0}
@@ -55,7 +64,7 @@ services:
         FEATURE_AI_EXTRA: ${FEATURE_AI_EXTRA:-0}
         FEATURE_MCP_BROWSER: ${FEATURE_MCP_BROWSER:-0}
         FEATURE_MCP_KUBERNETES: ${FEATURE_MCP_KUBERNETES:-0}
-    image: ${DEVBOX_IMAGE:-ai-devbox:latest}
+    image: ${DEVBOX_IMAGE:-ghcr.io/droderiquesit/development-box:latest}
     container_name: ai-devbox
     hostname: devbox
     <<: *devbox-security

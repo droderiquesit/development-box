@@ -25,22 +25,36 @@ DEVBOX_VERSION_FILE="${DEVBOX_ROOT}/versions.yaml"
 
 # ------------------------------- output --------------------------------------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${DEVBOX_PLAIN:-0}" != "1" ]; then
-  R=$'\033[0m'; B=$'\033[1m'; D=$'\033[2m'
-  RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; CYN=$'\033[36m'
+  R=$'\033[0m'
+  B=$'\033[1m'
+  D=$'\033[2m'
+  RED=$'\033[31m'
+  GRN=$'\033[32m'
+  YLW=$'\033[33m'
+  CYN=$'\033[36m'
 else
-  R=''; B=''; D=''; RED=''; GRN=''; YLW=''; CYN=''
+  R=''
+  B=''
+  D=''
+  RED=''
+  GRN=''
+  YLW=''
+  CYN=''
 fi
 
-say()   { printf '%s\n' "$*"; }
+say() { printf '%s\n' "$*"; }
 head1() { printf '\n%s%s%s\n' "$B" "$*" "$R"; }
 head2() { printf '\n%s%s%s\n' "$CYN" "$*" "$R"; }
-pass()  { printf '  %s✓%s %s\n' "$GRN" "$R" "$*"; }
-fail()  { printf '  %s✗%s %s\n' "$RED" "$R" "$*"; }
-skip()  { printf '  %s–%s %s%s%s\n' "$D" "$R" "$D" "$*" "$R"; }
-warned(){ printf '  %s!%s %s\n' "$YLW" "$R" "$*"; }
-info()  { printf '  %s%s%s\n' "$D" "$*" "$R"; }
-err()   { printf '%serror:%s %s\n' "$RED" "$R" "$*" >&2; }
-abort() { err "$*"; exit 1; }
+pass() { printf '  %s✓%s %s\n' "$GRN" "$R" "$*"; }
+fail() { printf '  %s✗%s %s\n' "$RED" "$R" "$*"; }
+skip() { printf '  %s–%s %s%s%s\n' "$D" "$R" "$D" "$*" "$R"; }
+warned() { printf '  %s!%s %s\n' "$YLW" "$R" "$*"; }
+info() { printf '  %s%s%s\n' "$D" "$*" "$R"; }
+err() { printf '%serror:%s %s\n' "$RED" "$R" "$*" >&2; }
+abort() {
+  err "$*"
+  exit 1
+}
 
 # ------------------------------- config --------------------------------------
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -49,10 +63,16 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # so a missing yq is a broken image, not a condition to work around.
 yqr() {
   local expr="$1" file="$2" default="${3:-}"
-  if ! have yq; then printf '%s' "$default"; return 1; fi
+  if ! have yq; then
+    printf '%s' "$default"
+    return 1
+  fi
   local out
-  out="$(yq -r "$expr" "$file" 2>/dev/null)" || { printf '%s' "$default"; return 1; }
-  case "$out" in ''|null) printf '%s' "$default" ;; *) printf '%s' "$out" ;; esac
+  out="$(yq -r "$expr" "$file" 2>/dev/null)" || {
+    printf '%s' "$default"
+    return 1
+  }
+  case "$out" in '' | null) printf '%s' "$default" ;; *) printf '%s' "$out" ;; esac
 }
 
 # Resolve a config file: a user copy under ~/.config/devbox wins over the
@@ -60,8 +80,10 @@ yqr() {
 # your customisations live in a volume, not in a layer.
 cfg_file() {
   local rel="$1"
-  if [ -f "${DEVBOX_CONFIG}/${rel}" ]; then printf '%s' "${DEVBOX_CONFIG}/${rel}"
-  elif [ -f "${DEVBOX_ROOT}/${rel}" ]; then printf '%s' "${DEVBOX_ROOT}/${rel}"
+  if [ -f "${DEVBOX_CONFIG}/${rel}" ]; then
+    printf '%s' "${DEVBOX_CONFIG}/${rel}"
+  elif [ -f "${DEVBOX_ROOT}/${rel}" ]; then
+    printf '%s' "${DEVBOX_ROOT}/${rel}"
   else return 1; fi
 }
 
@@ -73,7 +95,10 @@ MCP_SERVERS_FILE="$(cfg_file mcp/servers.yaml || true)"
 MCP_POLICY_FILE="$(cfg_file mcp/policies.yaml || true)"
 MCP_PROFILES_FILE="$(cfg_file mcp/profiles.yaml || true)"
 
-state_dir() { install -d -m 0700 "$DEVBOX_STATE" 2>/dev/null || true; printf '%s' "$DEVBOX_STATE"; }
+state_dir() {
+  install -d -m 0700 "$DEVBOX_STATE" 2>/dev/null || true
+  printf '%s' "$DEVBOX_STATE"
+}
 
 state_get() {
   local key="$1" default="${2:-}"
@@ -84,7 +109,7 @@ state_get() {
 state_set() {
   local key="$1" value="$2"
   state_dir >/dev/null
-  printf '%s' "$value" > "${DEVBOX_STATE}/${key}"
+  printf '%s' "$value" >"${DEVBOX_STATE}/${key}"
 }
 
 # ------------------------------- versions ------------------------------------
@@ -95,12 +120,34 @@ state_set() {
 # cosign), the pipeline reports 141, and `devbox doctor` cheerfully declares an
 # installed tool missing. Capture first, trim after.
 installed_version() {
-  local cmd="$1"; shift
+  local cmd="$1"
+  shift
   have "$cmd" || return 1
   local out first
   out="$("$cmd" "$@" 2>/dev/null)" || return 1
-  first="${out%%$'\n'*}"          # first line, no pipeline, no SIGPIPE
-  printf '%s' "${first%$'\r'}"    # strip a trailing CR if the tool emits one
+  first="${out%%$'\n'*}"       # first line, no pipeline, no SIGPIPE
+  printf '%s' "${first%$'\r'}" # strip a trailing CR if the tool emits one
+}
+
+# `list_has <needle>` — read a newline-separated list on stdin, succeed if one
+# line equals <needle> exactly.
+#
+# The same SIGPIPE trap as installed_version, and a nastier one because it is
+# intermittent. `producer | grep -qx "$needle"` looks obviously correct, but
+# grep exits the instant it matches, the producer takes SIGPIPE, and under
+# `pipefail` the pipeline reports 141 — so a value that IS present reads as
+# absent. It depends on scheduling, so it passes locally and fails in CI a few
+# runs later. Measured at ~2.5% per lookup against a six-item list; over the
+# dozens of lookups a policy check makes, that is a coin flip.
+#
+# This reads the whole stream and never exits early, so there is no signal to
+# race with.
+list_has() {
+  local needle="$1" line
+  while IFS= read -r line; do
+    [ "$line" = "$needle" ] && return 0
+  done
+  return 1
 }
 
 # ------------------------------- secrets -------------------------------------
@@ -131,14 +178,21 @@ redact() {
 # both derive from it, so there is exactly one place the rules live.
 classify_command() {
   local cmd="$1"
-  [ -n "$POLICY_FILE" ] || { printf 'APPROVAL_REQUIRED'; return; }
+  [ -n "$POLICY_FILE" ] || {
+    printf 'APPROVAL_REQUIRED'
+    return
+  }
   local class pattern
   # BLOCKED is checked first and wins over everything.
   for class in BLOCKED APPROVAL_REQUIRED REVIEW_REQUIRED SAFE; do
     while IFS= read -r pattern; do
       [ -n "$pattern" ] || continue
       # shellcheck disable=SC2254  # glob match is intentional
-      case "$cmd" in $pattern) printf '%s' "$class"; return ;; esac
+      case "$cmd" in $pattern)
+        printf '%s' "$class"
+        return
+        ;;
+      esac
     done < <(yq -r ".execution.${class}[]?" "$POLICY_FILE" 2>/dev/null)
   done
   yqr '.execution.default' "$POLICY_FILE" 'APPROVAL_REQUIRED'
@@ -151,7 +205,8 @@ guard_or_die() {
     BLOCKED)
       err "BLOCKED by ai/policies/policy.yaml: ${cmd}"
       info "This command is never run by DevBox tooling. Run it yourself if you truly intend to."
-      return 1 ;;
+      return 1
+      ;;
     APPROVAL_REQUIRED)
       if [ "${DEVBOX_ASSUME_YES:-0}" = "1" ]; then
         warned "APPROVAL_REQUIRED, auto-approved via DEVBOX_ASSUME_YES: ${cmd}"
@@ -159,7 +214,12 @@ guard_or_die() {
       fi
       printf '%s%s%s %s\n' "$YLW" "APPROVAL REQUIRED:" "$R" "$cmd"
       read -r -p "  run it? [y/N] " reply
-      case "$reply" in y|Y|yes|YES) return 0 ;; *) say "  skipped."; return 1 ;; esac ;;
+      case "$reply" in y | Y | yes | YES) return 0 ;; *)
+        say "  skipped."
+        return 1
+        ;;
+      esac
+      ;;
     *) return 0 ;;
   esac
 }
@@ -167,14 +227,16 @@ guard_or_die() {
 # ------------------------------- audit ---------------------------------------
 # Append-only JSONL. Never contains a credential value — only names and states.
 audit_log() {
-  local event="$1"; shift
+  local event="$1"
+  shift
   local logf="${DEVBOX_STATE}/audit.jsonl"
   state_dir >/dev/null
-  local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local details=""
   if [ "$#" -gt 0 ]; then details="$(printf '%s' "$*" | redact | sed 's/"/\\"/g')"; fi
   printf '{"ts":"%s","event":"%s","user":"%s","details":"%s"}\n' \
-    "$ts" "$event" "${USER:-unknown}" "$details" >> "$logf"
+    "$ts" "$event" "${USER:-unknown}" "$details" >>"$logf"
 }
 
 # ------------------------------- misc ----------------------------------------

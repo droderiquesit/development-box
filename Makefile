@@ -14,10 +14,22 @@ SHELL := /bin/bash
 .ONESHELL:
 
 ENGINE        ?= podman
-BASE_IMAGE    ?= ai-devbox-base
-DEVBOX_IMAGE  ?= ai-devbox
+REGISTRY      ?= ghcr.io
+# Derived from the git remote so a fork does not have to edit this file.
+# Falls back to the canonical repo when git cannot answer (no remote, a
+# read-only checkout, a tarball). An empty owner would silently produce
+# `ghcr.io/-base:1.0.0`, which fails with a confusing registry error.
+OWNER_REPO    ?= $(or $(shell git config --get remote.origin.url 2>/dev/null \
+                   | sed -E 's#(git@|https://)github\.com[:/]##; s#\.git$$##' \
+                   | tr 'A-Z' 'a-z'),droderiquesit/development-box)
+BASE_IMAGE    ?= $(REGISTRY)/$(OWNER_REPO)-base
+DEVBOX_IMAGE  ?= $(REGISTRY)/$(OWNER_REPO)
 TAG           ?= latest
-REGISTRY      ?=
+
+# The BASE version this DevBox builds on. Read from versions.yaml so the
+# Makefile, compose and CI cannot drift apart. Bumping it there is the base
+# patching mechanism; nothing here needs to change.
+BASE_VERSION  ?= $(shell awk '/^release:/{r=1;next} r&&/^  base:/{gsub(/.*: *"?|"$$/,"");print;exit} r&&/^[^ ]/{exit}' versions.yaml)
 
 VCS_REF       := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -35,8 +47,11 @@ FEATURE_MCP_BROWSER    ?= 0
 FEATURE_MCP_KUBERNETES ?= 0
 FEATURE_ANSIBLE        ?= 0
 
-BASE_REF   := $(if $(REGISTRY),$(REGISTRY)/,)$(BASE_IMAGE):$(TAG)
-DEVBOX_REF := $(if $(REGISTRY),$(REGISTRY)/,)$(DEVBOX_IMAGE):$(TAG)
+# The DevBox builds FROM the published, pinned base — it does not rebuild it.
+# `make build-base` exists for developing the base itself, not as a dependency
+# of `make build`.
+BASE_REF   := $(BASE_IMAGE):$(BASE_VERSION)
+DEVBOX_REF := $(DEVBOX_IMAGE):$(TAG)
 
 COMMON_ARGS := \
 	--build-arg VCS_REF=$(VCS_REF) \
@@ -66,17 +81,36 @@ help: ## Show this help
 	@echo ""
 
 # --------------------------------------------------------------------- build --
+# `build` does NOT build the base. The DevBox builds FROM a published base
+# release — same rule as CI — so that what you build locally has the identical
+# foundation to what ships. `make build-base` is for developing the base itself.
 .PHONY: build
-build: build-base build-devbox ## Build both images
+build: pull-base build-devbox ## Build the DevBox on the pinned, published base
+
+.PHONY: pull-base
+pull-base: ## Pull the pinned base image release from the registry
+	@echo "base pinned to $(BASE_VERSION) by versions.yaml"
+	$(ENGINE) pull $(BASE_REF) || { \
+	  echo ""; \
+	  echo "could not pull $(BASE_REF)."; \
+	  echo "  * private registry? $(ENGINE) login $(REGISTRY)"; \
+	  echo "  * developing the base itself? make build-base"; \
+	  exit 1; \
+	}
 
 .PHONY: build-base
-build-base: ## Build the base image (OS + language runtimes)
+build-base: ## Build the base image LOCALLY (for developing the base)
+	@echo "building a LOCAL base — this is not the published $(BASE_REF)"
 	$(ENGINE) build -f Containerfile.base -t $(BASE_REF) $(COMMON_ARGS) .
 
 .PHONY: build-devbox
-build-devbox: ## Build the DevBox image (needs the base image)
+build-devbox: ## Build the DevBox image on $(BASE_REF)
 	$(ENGINE) build -f Containerfile -t $(DEVBOX_REF) \
 	  --build-arg BASE_IMAGE_REF=$(BASE_REF) $(COMMON_ARGS) $(FEATURE_ARGS) .
+
+.PHONY: pull
+pull: ## Pull the published DevBox image instead of building it
+	$(ENGINE) pull $(DEVBOX_REF)
 
 .PHONY: rebuild
 rebuild: ## Rebuild the DevBox image only (the common case)

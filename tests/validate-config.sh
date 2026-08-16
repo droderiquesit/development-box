@@ -9,6 +9,17 @@
 # -----------------------------------------------------------------------------
 set -uo pipefail
 
+# `list_has <needle>` — read a newline-separated list on stdin, succeed if a
+# line equals <needle>. Deliberately not `grep -qx`: grep exits on first match,
+# the producer takes SIGPIPE, and `pipefail` turns a present value into an
+# absent one, intermittently. See bin/devbox-lib.sh for the long version.
+list_has() {
+  local needle="$1" line
+  while IFS= read -r line; do [ "$line" = "$needle" ] && return 0; done
+  return 1
+}
+
+
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." || exit 1
 
 PASS=0; FAIL=0
@@ -177,9 +188,14 @@ done < <(yq -r '.servers | to_entries[] | select(.value.access == "read-write") 
 while IFS= read -r s; do
   [ -n "$s" ] || continue
   miss=""
+  args="$(yq -r ".servers.${s}.container_args[]?" mcp/servers.yaml)"
   while IFS= read -r req; do
     [ -n "$req" ] || continue
-    yq -r ".servers.${s}.container_args[]?" mcp/servers.yaml | grep -qxF -- "$req" || miss="${miss} ${req}"
+    # NOT `yq ... | grep -qxF`: grep exits on the first match, yq takes
+    # SIGPIPE, and under `pipefail` the pipeline reports 141 — so a required
+    # arg that IS present reads as missing. Intermittent (~2.5% per lookup),
+    # which is exactly how it passed locally and failed in CI.
+    printf '%s\n' "$args" | list_has "$req" || miss="${miss} ${req}"
   done < <(yq -r '.requirements.container_hardening.required_args[]' mcp/policies.yaml)
   [ -z "$miss" ] && ok "container server '${s}' is hardened" || no "container server '${s}' missing:${miss}"
 done < <(yq -r '.servers | to_entries[] | select(.value.transport == "container") | .key' mcp/servers.yaml 2>/dev/null)
@@ -224,6 +240,53 @@ while IFS= read -r role; do
 done < <(yq -r '.workflows[].steps[] | select(.kind == "agent") | .role' ai/models/routing.yaml 2>/dev/null | sort -u)
 
 # ---------------------------------------------------------------------------
+sect "release model"
+# Two independent version streams, and the DevBox consumes a PUBLISHED base
+# rather than rebuilding one. These checks exist because every one of them is a
+# way the model can silently degrade back into "rebuild everything each time".
+for k in base devbox; do
+  v="$(yq -r ".release.${k} // \"\"" versions.yaml)"
+  if printf '%s' "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    ok "release.${k} is a semver (${v})"
+  else
+    no "release.${k} must be MAJOR.MINOR.PATCH, got '${v}'"
+  fi
+done
+
+pinned_base="$(yq -r '.release.base' versions.yaml)"
+
+# The Containerfile's default base ref must name the pinned version. If it
+# drifts, a local `podman build` silently produces a DevBox on a different
+# foundation than CI built, and the two are indistinguishable afterwards.
+cf_base="$(awk -F= '/^ARG BASE_IMAGE_REF=/{print $2; exit}' Containerfile)"
+case "$cf_base" in
+  *":${pinned_base}") ok "Containerfile default base matches release.base (${pinned_base})" ;;
+  *:latest | *:edge) no "Containerfile default base is a floating tag (${cf_base}) — pin it to release.base" ;;
+  *) no "Containerfile default base '${cf_base}' does not match release.base '${pinned_base}'" ;;
+esac
+
+# Same for compose, which is what `docker compose up` and the devcontainer use.
+compose_base="$(awk -F'-' '/BASE_IMAGE_REF: \$\{DEVBOX_BASE_IMAGE:/{sub(/\}.*/,"",$NF); print $NF; exit}' compose.yaml)"
+case "$compose_base" in
+  *":${pinned_base}") ok "compose default base matches release.base (${pinned_base})" ;;
+  "") no "compose.yaml has no BASE_IMAGE_REF default" ;;
+  *) no "compose default base '${compose_base}' does not match release.base '${pinned_base}'" ;;
+esac
+
+# The registry is the source of base images. A local-only default would work on
+# the machine that built it and nowhere else.
+case "$cf_base" in
+  ghcr.io/*) ok "Containerfile pulls its base from a registry" ;;
+  *) no "Containerfile base '${cf_base}' is not a registry reference" ;;
+esac
+
+# Helper scripts the workflows depend on must exist and be executable, or the
+# failure surfaces as an inscrutable 'Permission denied' halfway through CI.
+for h in image-ref.sh podman-build.sh publish-image.sh; do
+  if [ -x ".github/scripts/${h}" ]; then ok "${h} is executable"
+  else no ".github/scripts/${h} missing or not executable"; fi
+done
+
 sect "container definitions"
 for cf in Containerfile Containerfile.base; do
   grep -qE '^USER +\$\{?DEV_USER' "$cf" && ok "${cf}: ends as non-root" || no "${cf}: no non-root USER"

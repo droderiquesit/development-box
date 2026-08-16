@@ -13,9 +13,8 @@
 > Going forward, use `gh auth login` (which stores the token in the OS keychain)
 > rather than exporting a PAT, and never paste a credential into a document.
 
-
 **Date:** August 15, 2026  
-**Owner:** David Roderiques (droderiques.it@gmail.com)  
+**Owner:** David Roderiques (<droderiques.it@gmail.com>)  
 **Repository:** development-box
 
 ---
@@ -29,29 +28,34 @@ This document provides **3 implementation options** to create and secure your `d
 ## 🚀 Option 1: GitHub CLI (Recommended - Fastest)
 
 ### Prerequisites
+
 - GitHub CLI installed: `brew install gh` (macOS) or `choco install gh` (Windows)
 - GitHub token ready (provided)
 
 ### Step-by-Step
 
-**Step 1: Set Environment Variable**
+#### Step 1: Set Environment Variable
+
 ```bash
 export GITHUB_TOKEN="<REDACTED-ROTATE-THIS-TOKEN>"
 ```
 
-**Step 2: Navigate to Your Project Directory**
+#### Step 2: Navigate to Your Project Directory
+
 ```bash
 cd /path/to/development-box
 ```
 
-**Step 3: Initialize Git (if not already done)**
+#### Step 3: Initialize Git (if not already done)
+
 ```bash
 git init
 git add .
 git commit -m "Initial commit with security guardrails"
 ```
 
-**Step 4: Create Repository**
+#### Step 4: Create Repository
+
 ```bash
 gh repo create development-box \
   --private \
@@ -61,13 +65,15 @@ gh repo create development-box \
   --push
 ```
 
-**Step 5: Verify Creation**
+#### Step 5: Verify Creation
+
 ```bash
 gh repo view droderiquesit/development-box
 ```
 
 **Output should show:**
-```
+
+```text
 ✓ Repository created successfully
   Name: development-box
   Visibility: Private
@@ -93,11 +99,13 @@ gh repo edit droderiquesit/development-box \
 
 ### Step-by-Step
 
-**Step 1: Go to GitHub**
-- Open: https://github.com/new
+#### Step 1: Go to GitHub
 
-**Step 2: Configure Repository**
-```
+- Open: <https://github.com/new>
+
+#### Step 2: Configure Repository
+
+```text
 Repository name:        development-box
 Description:            Development environment repository (droderiques.it@gmail.com) - Secure workspace with security guardrails
 Visibility:             Private ✓
@@ -106,33 +114,39 @@ Add .gitignore:         None (we'll add manually)
 Choose license:         MIT License
 ```
 
-**Step 3: Create Repository**
+#### Step 3: Create Repository
+
 - Click "Create repository"
 
-**Step 4: Clone to Local Machine**
+#### Step 4: Clone to Local Machine
+
 ```bash
 git clone git@github.com:droderiquesit/development-box.git
 cd development-box
 ```
 
-**Step 5: Add Security Files**
+#### Step 5: Add Security Files
+
 Copy these files to your local repo:
+
 - `.gitignore`
 - `SECURITY.md`
 - `CODEOWNERS`
 - `README.md`
 - `LICENSE`
 
-**Step 6: Commit and Push**
+#### Step 6: Commit and Push
+
 ```bash
 git add .
 git commit -m "chore: add security guardrails and documentation"
 git push origin main
 ```
 
-**Step 7: Configure Branch Protection (GitHub Web UI)**
+#### Step 7: Configure Branch Protection (GitHub Web UI)
 
 **For `main` branch:**
+
 1. Go to Settings → Branches
 2. Add branch protection rule for `main`
 3. Configure:
@@ -144,6 +158,7 @@ git push origin main
    - ✅ Enforce all above rules for administrators
 
 **For `develop` branch:**
+
 1. Add another branch protection rule for `develop`
 2. Use same settings as `main`
 
@@ -154,13 +169,15 @@ git push origin main
 ## 🔧 Option 3: GitHub API (Advanced)
 
 ### Prerequisites
+
 - GitHub CLI installed
 - API familiarity
 - Token with `repo` scope
 
 ### Step-by-Step
 
-**Step 1: Create Repository via API**
+#### Step 1: Create Repository via API
+
 ```bash
 curl -X POST https://api.github.com/user/repos \
   -H "Authorization: token <REDACTED-ROTATE-THIS-TOKEN>" \
@@ -174,7 +191,8 @@ curl -X POST https://api.github.com/user/repos \
   }'
 ```
 
-**Step 2: Add Branch Protection**
+#### Step 2: Add Branch Protection
+
 ```bash
 curl -X PUT https://api.github.com/repos/droderiquesit/development-box/branches/main/protection \
   -H "Authorization: token <REDACTED-ROTATE-THIS-TOKEN>" \
@@ -194,7 +212,8 @@ curl -X PUT https://api.github.com/repos/droderiquesit/development-box/branches/
   }'
 ```
 
-**Step 3: Add CODEOWNERS File**
+#### Step 3: Add CODEOWNERS File
+
 ```bash
 curl -X PUT https://api.github.com/repos/droderiquesit/development-box/contents/.github/CODEOWNERS \
   -H "Authorization: token <REDACTED-ROTATE-THIS-TOKEN>" \
@@ -213,7 +232,7 @@ curl -X PUT https://api.github.com/repos/droderiquesit/development-box/contents/
 
 After choosing any option above, verify:
 
-- [ ] Repository created and visible at: https://github.com/droderiquesit/development-box
+- [ ] Repository created and visible at: <https://github.com/droderiquesit/development-box>
 - [ ] Repository is **PRIVATE**
 - [ ] `main` branch has branch protection enabled
 - [ ] `develop` branch has branch protection enabled
@@ -229,6 +248,7 @@ After choosing any option above, verify:
 ## 🔐 Security Configuration Checklist
 
 ### Repository Settings
+
 - [ ] Visibility set to Private
 - [ ] Require pull request reviews enabled
 - [ ] Status checks required before merge
@@ -238,18 +258,21 @@ After choosing any option above, verify:
 - [ ] Allow auto-merge enabled
 
 ### Access Control
+
 - [ ] Only owner has repository access
 - [ ] No public collaborators added
 - [ ] SSH keys verified and secure
 - [ ] Two-factor authentication enabled on GitHub account
 
 ### Secrets & Credentials
+
 - [ ] `.env` file in `.gitignore`
 - [ ] No API keys in `.env.example`
 - [ ] No credentials in README or documentation
 - [ ] `.env.example` template created (if applicable)
 
 ### Branch Protection
+
 - [ ] CODEOWNERS file configured
 - [ ] Branch protection on `main` enforced
 - [ ] Branch protection on `develop` enforced
@@ -261,7 +284,7 @@ After choosing any option above, verify:
 
 **After successfully creating the repository:**
 
-1. **Go to GitHub:** https://github.com/settings/tokens
+1. **Go to GitHub:** <https://github.com/settings/tokens>
 
 2. **Find the token:** `development-box-setup` or your token name
 
@@ -280,12 +303,14 @@ After choosing any option above, verify:
 ### Create Branches
 
 **Development branch:**
+
 ```bash
 git checkout -b develop
 git push -u origin develop
 ```
 
 **Feature branch template:**
+
 ```bash
 git checkout -b feature/your-feature-name
 # Make changes
@@ -325,21 +350,25 @@ The following files have been created and are ready to push:
 ## ❓ Troubleshooting
 
 ### "fatal: not a git repository"
+
 ```bash
 git init
 ```
 
 ### "Authentication failed"
+
 - Check token is correctly set in environment
 - Verify token hasn't been revoked
 - Generate new token if needed
 
 ### "Branch protection not applying"
+
 - Wait a few seconds for GitHub to sync
 - Refresh the page
 - Check if you're on the correct repository
 
 ### "Repository already exists"
+
 ```bash
 # If repo exists locally, update remote
 git remote set-url origin https://github.com/droderiquesit/development-box.git
@@ -351,9 +380,10 @@ git push -u origin main
 ## 📞 Support
 
 **Repository Owner:** David Roderiques  
-**Email:** droderiques.it@gmail.com
+**Email:** <droderiques.it@gmail.com>
 
 For questions about:
+
 - Security policies → See `SECURITY.md`
 - Development workflow → See `README.md`
 - Code review standards → See `CODEOWNERS`

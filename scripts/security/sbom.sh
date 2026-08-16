@@ -22,11 +22,28 @@ NAME="workspace"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --image)  TARGET="$2"; NAME="$(printf '%s' "$2" | tr '/:' '__')"; shift 2 ;;
-    --path)   TARGET="dir:$2"; NAME="$(basename "$2")"; shift 2 ;;
-    --output) OUT="$2"; shift 2 ;;
-    --sign)   SIGN=1; shift ;;
-    -h|--help) sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --image)
+      TARGET="$2"
+      NAME="$(printf '%s' "$2" | tr '/:' '__')"
+      shift 2
+      ;;
+    --path)
+      TARGET="dir:$2"
+      NAME="$(basename "$2")"
+      shift 2
+      ;;
+    --output)
+      OUT="$2"
+      shift 2
+      ;;
+    --sign)
+      SIGN=1
+      shift
+      ;;
+    -h | --help)
+      sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
     *) shift ;;
   esac
 done
@@ -43,8 +60,8 @@ CDX="${OUT}/${NAME}.cdx.json"
 # what security tooling consumes. They are cheap to produce and annoying to
 # retrofit.
 head2 "Generating"
-syft scan "$TARGET" -o "spdx-json=${SPDX}" -o "cyclonedx-json=${CDX}" -q \
-  || abort "syft failed"
+syft scan "$TARGET" -o "spdx-json=${SPDX}" -o "cyclonedx-json=${CDX}" -q ||
+  abort "syft failed"
 pass "SPDX      ${SPDX}"
 pass "CycloneDX ${CDX}"
 info "$(jq -r '.packages | length' "$SPDX" 2>/dev/null || echo '?') packages catalogued"
@@ -74,9 +91,9 @@ if [ "$SIGN" = 1 ]; then
     # Keyless signing binds the artefact to an OIDC identity, so there is no key
     # to store, rotate or leak. In CI this is the GitHub Actions OIDC token.
     COSIGN_EXPERIMENTAL=1 cosign sign-blob --yes \
-      --output-signature "${SPDX}.sig" --output-certificate "${SPDX}.pem" "$SPDX" \
-      && pass "signed ${SPDX}.sig" \
-      || warned "cosign signing failed (needs an OIDC identity — works in CI)"
+      --output-signature "${SPDX}.sig" --output-certificate "${SPDX}.pem" "$SPDX" &&
+      pass "signed ${SPDX}.sig" ||
+      warned "cosign signing failed (needs an OIDC identity — works in CI)"
   else
     skip "cosign not installed"
   fi

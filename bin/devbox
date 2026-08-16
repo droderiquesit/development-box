@@ -65,8 +65,10 @@ EOF
 # banner
 # =============================================================================
 cmd_banner() {
-  local prof; prof="$(state_get active-profile "$(yqr '.default' "$PROFILES_FILE" balanced)")"
-  local mprof; mprof="$(state_get mcp-profile "$(yqr '.default' "$MCP_PROFILES_FILE" READ_ONLY)")"
+  local prof
+  prof="$(state_get active-profile "$(yqr '.default' "$PROFILES_FILE" balanced)")"
+  local mprof
+  mprof="$(state_get mcp-profile "$(yqr '.default' "$MCP_PROFILES_FILE" READ_ONLY)")"
   printf '\n%s  AI ENGINEERING DEVBOX%s  %s%s%s\n' "$B" "$R" "$D" "$(devbox_image_version)" "$R"
   printf '  %sworkspace%s %s   %sai profile%s %s   %smcp profile%s %s\n\n' \
     "$D" "$R" "$DEVBOX_WORKSPACE" "$D" "$R" "$prof" "$D" "$R" "$mprof"
@@ -95,13 +97,15 @@ cmd_status() {
   fi
 
   head2 "AI"
-  local prof; prof="$(state_get active-profile "$(yqr '.default' "$PROFILES_FILE" balanced)")"
+  local prof
+  prof="$(state_get active-profile "$(yqr '.default' "$PROFILES_FILE" balanced)")"
   pass "profile ${prof} — $(yqr ".profiles.${prof}.description" "$PROFILES_FILE" '')"
   local provider model
   provider="$(yqr ".profiles.${prof}.provider" "$PROFILES_FILE" '?')"
   model="$(yqr ".profiles.${prof}.model" "$PROFILES_FILE" '?')"
   pass "provider ${provider} · model alias ${model}"
-  local mprof; mprof="$(state_get mcp-profile "$(yqr '.default' "$MCP_PROFILES_FILE" READ_ONLY)")"
+  local mprof
+  mprof="$(state_get mcp-profile "$(yqr '.default' "$MCP_PROFILES_FILE" READ_ONLY)")"
   pass "mcp trust profile ${mprof}"
 
   head2 "Credentials (presence only — values are never read)"
@@ -120,21 +124,26 @@ cmd_status() {
 # =============================================================================
 # doctor
 # =============================================================================
-DOCTOR_OK=0; DOCTOR_WARN=0; DOCTOR_FAIL=0
-DOCTOR_QUIET=0; DOCTOR_CORE=0; DOCTOR_JSON=0
+DOCTOR_OK=0
+DOCTOR_WARN=0
+DOCTOR_FAIL=0
+DOCTOR_QUIET=0
+DOCTOR_CORE=0
+DOCTOR_JSON=0
 DOCTOR_JSON_ROWS=()
 
-check() {                      # check <label> <required|optional> <cmd> [args...]
-  local label="$1" req="$2"; shift 2
+check() { # check <label> <required|optional> <cmd> [args...]
+  local label="$1" req="$2"
+  shift 2
   local ver=""
   if ver="$(installed_version "$@" 2>/dev/null)" && [ -n "$ver" ]; then
-    DOCTOR_OK=$((DOCTOR_OK+1))
+    DOCTOR_OK=$((DOCTOR_OK + 1))
     DOCTOR_JSON_ROWS+=("{\"name\":\"$label\",\"status\":\"ok\",\"detail\":\"$(printf '%s' "$ver" | sed 's/"/\\"/g')\"}")
     [ "$DOCTOR_QUIET" = 1 ] || pass "$(printf '%-16s %s' "$label" "$D${ver}$R")"
     return 0
   fi
   if [ "$req" = required ]; then
-    DOCTOR_FAIL=$((DOCTOR_FAIL+1))
+    DOCTOR_FAIL=$((DOCTOR_FAIL + 1))
     DOCTOR_JSON_ROWS+=("{\"name\":\"$label\",\"status\":\"missing\"}")
     [ "$DOCTOR_QUIET" = 1 ] || fail "$(printf '%-16s %s' "$label" "not found")"
     return 1
@@ -144,81 +153,100 @@ check() {                      # check <label> <required|optional> <cmd> [args..
   return 0
 }
 
-note_ok()   { DOCTOR_OK=$((DOCTOR_OK+1));   DOCTOR_JSON_ROWS+=("{\"name\":\"$1\",\"status\":\"ok\",\"detail\":\"$2\"}");   [ "$DOCTOR_QUIET" = 1 ] || pass "$(printf '%-16s %s' "$1" "$D$2$R")"; }
-note_warn() { DOCTOR_WARN=$((DOCTOR_WARN+1)); DOCTOR_JSON_ROWS+=("{\"name\":\"$1\",\"status\":\"warn\",\"detail\":\"$2\"}"); [ "$DOCTOR_QUIET" = 1 ] || warned "$(printf '%-16s %s' "$1" "$2")"; }
-note_fail() { DOCTOR_FAIL=$((DOCTOR_FAIL+1)); DOCTOR_JSON_ROWS+=("{\"name\":\"$1\",\"status\":\"fail\",\"detail\":\"$2\"}"); [ "$DOCTOR_QUIET" = 1 ] || fail "$(printf '%-16s %s' "$1" "$2")"; }
-note_skip() { DOCTOR_JSON_ROWS+=("{\"name\":\"$1\",\"status\":\"skip\",\"detail\":\"$2\"}"); [ "$DOCTOR_QUIET" = 1 ] || skip "$(printf '%-16s %s' "$1" "$2")"; }
+note_ok() {
+  DOCTOR_OK=$((DOCTOR_OK + 1))
+  DOCTOR_JSON_ROWS+=("{\"name\":\"$1\",\"status\":\"ok\",\"detail\":\"$2\"}")
+  [ "$DOCTOR_QUIET" = 1 ] || pass "$(printf '%-16s %s' "$1" "$D$2$R")"
+}
+note_warn() {
+  DOCTOR_WARN=$((DOCTOR_WARN + 1))
+  DOCTOR_JSON_ROWS+=("{\"name\":\"$1\",\"status\":\"warn\",\"detail\":\"$2\"}")
+  [ "$DOCTOR_QUIET" = 1 ] || warned "$(printf '%-16s %s' "$1" "$2")"
+}
+note_fail() {
+  DOCTOR_FAIL=$((DOCTOR_FAIL + 1))
+  DOCTOR_JSON_ROWS+=("{\"name\":\"$1\",\"status\":\"fail\",\"detail\":\"$2\"}")
+  [ "$DOCTOR_QUIET" = 1 ] || fail "$(printf '%-16s %s' "$1" "$2")"
+}
+note_skip() {
+  DOCTOR_JSON_ROWS+=("{\"name\":\"$1\",\"status\":\"skip\",\"detail\":\"$2\"}")
+  [ "$DOCTOR_QUIET" = 1 ] || skip "$(printf '%-16s %s' "$1" "$2")"
+}
 
 cmd_doctor() {
   while [ $# -gt 0 ]; do
     case "$1" in
-      --quiet|-q)  DOCTOR_QUIET=1 ;;
+      --quiet | -q) DOCTOR_QUIET=1 ;;
       --core-only) DOCTOR_CORE=1 ;;
-      --json)      DOCTOR_JSON=1; DOCTOR_QUIET=1 ;;
+      --json)
+        DOCTOR_JSON=1
+        DOCTOR_QUIET=1
+        ;;
       *) abort "unknown option: $1" ;;
-    esac; shift
+    esac
+    shift
   done
 
   [ "$DOCTOR_QUIET" = 1 ] || head1 "AI ENGINEERING DEVBOX — doctor"
 
   [ "$DOCTOR_QUIET" = 1 ] || head2 "Core"
-  check "Git"          required git --version
-  check "GitHub CLI"   required gh --version
-  check "Python"       required python3 --version
-  check "Node"         required node --version
-  check "Go"           required go version
-  check "uv"           required uv --version
-  check "jq"           required jq --version
-  check "yq"           required yq --version
-  check "make"         required make --version
-  check "just"         optional just --version
-  check "task"         optional task --version
+  check "Git" required git --version
+  check "GitHub CLI" required gh --version
+  check "Python" required python3 --version
+  check "Node" required node --version
+  check "Go" required go version
+  check "uv" required uv --version
+  check "jq" required jq --version
+  check "yq" required yq --version
+  check "make" required make --version
+  check "just" optional just --version
+  check "task" optional task --version
 
   if [ "$DOCTOR_CORE" = 0 ]; then
     [ "$DOCTOR_QUIET" = 1 ] || head2 "Infrastructure as Code"
-    check "Terraform"    required terraform version
-    check "OpenTofu"     required tofu version
-    check "Terragrunt"   optional terragrunt --version
+    check "Terraform" required terraform version
+    check "OpenTofu" required tofu version
+    check "Terragrunt" optional terragrunt --version
     check "terraform-ls" optional terraform-ls --version
-    check "tflint"       required tflint --version
+    check "tflint" required tflint --version
     check "terraform-docs" optional terraform-docs --version
-    check "infracost"    optional infracost --version
+    check "infracost" optional infracost --version
 
     [ "$DOCTOR_QUIET" = 1 ] || head2 "Kubernetes / GitOps"
-    check "kubectl"      required kubectl version --client=true --output=yaml
-    check "Helm"         required helm version --short
-    check "kustomize"    optional kustomize version
-    check "k9s"          optional k9s version --short
-    check "stern"        optional stern --version
-    check "flux"         optional flux --version
-    check "kind"         optional kind --version
+    check "kubectl" required kubectl version --client=true --output=yaml
+    check "Helm" required helm version --short
+    check "kustomize" optional kustomize version
+    check "k9s" optional k9s version --short
+    check "stern" optional stern --version
+    check "flux" optional flux --version
+    check "kind" optional kind --version
 
     [ "$DOCTOR_QUIET" = 1 ] || head2 "Security / supply chain"
-    check "Trivy"        required trivy --version
-    check "Checkov"      required checkov --version
-    check "gitleaks"     required gitleaks version
-    check "OPA"          required opa version
-    check "conftest"     required conftest --version
-    check "semgrep"      optional semgrep --version
-    check "syft"         optional syft version
-    check "grype"        optional grype version
-    check "cosign"       optional cosign version
-    check "shellcheck"   required shellcheck --version
-    check "yamllint"     required yamllint --version
-    check "actionlint"   required actionlint -version
+    check "Trivy" required trivy --version
+    check "Checkov" required checkov --version
+    check "gitleaks" required gitleaks version
+    check "OPA" required opa version
+    check "conftest" required conftest --version
+    check "semgrep" optional semgrep --version
+    check "syft" optional syft version
+    check "grype" optional grype version
+    check "cosign" optional cosign version
+    check "shellcheck" required shellcheck --version
+    check "yamllint" required yamllint --version
+    check "actionlint" required actionlint -version
 
     [ "$DOCTOR_QUIET" = 1 ] || head2 "Cloud"
-    check "AWS CLI"      optional aws --version
-    check "Azure CLI"    optional az version
-    check "gcloud"       optional gcloud --version
+    check "AWS CLI" optional aws --version
+    check "Azure CLI" optional az version
+    check "gcloud" optional gcloud --version
   fi
 
   [ "$DOCTOR_QUIET" = 1 ] || head2 "AI platform"
-  check "Claude Code"  required claude --version
-  check "Codex"        required codex --version
-  check "Gemini CLI"   optional gemini --version
-  check "llm"          optional llm --version
-  check "LiteLLM"      optional litellm --version
+  check "Claude Code" required claude --version
+  check "Codex" required codex --version
+  check "Gemini CLI" optional gemini --version
+  check "llm" optional llm --version
+  check "LiteLLM" optional litellm --version
   doctor_ai_config
 
   [ "$DOCTOR_QUIET" = 1 ] || head2 "MCP"
@@ -231,9 +259,9 @@ cmd_doctor() {
 }
 
 doctor_ai_config() {
-  [ -n "$MODELS_FILE" ]   && note_ok  "models.yaml"  "$MODELS_FILE"   || note_fail "models.yaml"  "missing"
-  [ -n "$PROFILES_FILE" ] && note_ok  "profiles.yaml" "$PROFILES_FILE" || note_fail "profiles.yaml" "missing"
-  [ -n "$POLICY_FILE" ]   && note_ok  "policy.yaml"  "$POLICY_FILE"   || note_fail "policy.yaml"  "missing"
+  [ -n "$MODELS_FILE" ] && note_ok "models.yaml" "$MODELS_FILE" || note_fail "models.yaml" "missing"
+  [ -n "$PROFILES_FILE" ] && note_ok "profiles.yaml" "$PROFILES_FILE" || note_fail "profiles.yaml" "missing"
+  [ -n "$POLICY_FILE" ] && note_ok "policy.yaml" "$POLICY_FILE" || note_fail "policy.yaml" "missing"
 
   # Providers: report which are USABLE (credential present), never the value.
   local any=0 p cred
@@ -255,12 +283,16 @@ doctor_ai_config() {
 }
 
 doctor_mcp() {
-  if [ -z "$MCP_SERVERS_FILE" ]; then note_fail "mcp registry" "servers.yaml missing"; return; fi
+  if [ -z "$MCP_SERVERS_FILE" ]; then
+    note_fail "mcp registry" "servers.yaml missing"
+    return
+  fi
   local enabled total
   total="$(yq -r '.servers | keys | length' "$MCP_SERVERS_FILE" 2>/dev/null || echo 0)"
   enabled="$(yq -r '[.servers[] | select(.enabled == true)] | length' "$MCP_SERVERS_FILE" 2>/dev/null || echo 0)"
   note_ok "mcp registry" "${enabled}/${total} servers enabled"
-  local mprof; mprof="$(state_get mcp-profile "$(yqr '.default' "$MCP_PROFILES_FILE" READ_ONLY)")"
+  local mprof
+  mprof="$(state_get mcp-profile "$(yqr '.default' "$MCP_PROFILES_FILE" READ_ONLY)")"
   if [ "$mprof" = "PRIVILEGED" ]; then
     note_warn "mcp profile" "PRIVILEGED — elevated; reverts to DEVELOPER automatically"
   else
@@ -269,7 +301,7 @@ doctor_mcp() {
   # A restricted-trust server that is enabled is worth surfacing every time.
   local risky
   risky="$(yq -r '[.servers | to_entries[] | select(.value.enabled == true and .value.trust == "restricted") | .key] | join(", ")' "$MCP_SERVERS_FILE" 2>/dev/null)"
-  [ -n "$risky" ] && [ "$risky" != "null" ] && [ "$risky" != "" ] && \
+  [ -n "$risky" ] && [ "$risky" != "null" ] && [ "$risky" != "" ] &&
     note_warn "mcp trust" "restricted servers enabled: ${risky}"
   return 0
 }
@@ -291,14 +323,15 @@ doctor_environment() {
   local cp_
   for cp_ in "$HOME/.ssh" "$HOME/.aws" "$HOME/.azure" "$HOME/.config/gcloud"; do
     if [ -d "$cp_" ]; then
-      if [ -w "$cp_" ]; then note_warn "credentials" "$cp_ is writable — prefer a read-only mount"
+      if [ -w "$cp_" ]; then
+        note_warn "credentials" "$cp_ is writable — prefer a read-only mount"
       else note_ok "credentials" "$cp_ read-only"; fi
     fi
   done
   # VS Code dev container compatibility
-  [ -r "${DEVBOX_WORKSPACE}/.devcontainer/devcontainer.json" ] || [ -r /opt/devbox/.devcontainer.json ] \
-    && note_ok "vscode" "dev container configuration present" \
-    || note_skip "vscode" "no devcontainer.json in workspace"
+  [ -r "${DEVBOX_WORKSPACE}/.devcontainer/devcontainer.json" ] || [ -r /opt/devbox/.devcontainer.json ] &&
+    note_ok "vscode" "dev container configuration present" ||
+    note_skip "vscode" "no devcontainer.json in workspace"
   return 0
 }
 
@@ -309,7 +342,10 @@ doctor_report() {
     [ "$DOCTOR_FAIL" -gt 0 ] && status=UNHEALTHY
     printf '{"status":"%s","ok":%d,"warn":%d,"fail":%d,"checks":[%s]}\n' \
       "$status" "$DOCTOR_OK" "$DOCTOR_WARN" "$DOCTOR_FAIL" \
-      "$(IFS=,; echo "${DOCTOR_JSON_ROWS[*]-}")"
+      "$(
+        IFS=,
+        echo "${DOCTOR_JSON_ROWS[*]-}"
+      )"
   elif [ "$DOCTOR_QUIET" = 0 ]; then
     printf '\n'
     if [ "$DOCTOR_FAIL" -gt 0 ]; then
@@ -343,7 +379,7 @@ cmd_info() {
   head2 "Build features"
   local f
   for f in FEATURE_CLOUD_AWS FEATURE_CLOUD_AZURE FEATURE_CLOUD_GCP FEATURE_K8S_LOCAL \
-           FEATURE_AI_GEMINI FEATURE_AI_EXTRA FEATURE_MCP_BROWSER FEATURE_MCP_KUBERNETES; do
+    FEATURE_AI_GEMINI FEATURE_AI_EXTRA FEATURE_MCP_BROWSER FEATURE_MCP_KUBERNETES; do
     info "$(printf '%-24s %s' "$f" "${!f:-0}")"
   done
   printf '\n'
@@ -354,38 +390,42 @@ cmd_versions() {
   head1 "Pinned vs installed"
   printf '  %-18s %-16s %s\n' "TOOL" "PINNED" "INSTALLED"
   vrow() { printf '  %-18s %-16s %s\n' "$1" "$2" "${3:-$D—$R}"; }
-  vrow terraform  "$(yqr '.iac.terraform' "$DEVBOX_VERSION_FILE")"        "$(installed_version terraform version)"
-  vrow opentofu   "$(yqr '.iac.opentofu' "$DEVBOX_VERSION_FILE")"         "$(installed_version tofu version)"
-  vrow terragrunt "$(yqr '.iac.terragrunt' "$DEVBOX_VERSION_FILE")"       "$(installed_version terragrunt --version)"
-  vrow tflint     "$(yqr '.iac.tflint' "$DEVBOX_VERSION_FILE")"           "$(installed_version tflint --version)"
-  vrow checkov    "$(yqr '.iac.checkov' "$DEVBOX_VERSION_FILE")"          "$(installed_version checkov --version)"
-  vrow kubectl    "$(yqr '.kubernetes.kubectl' "$DEVBOX_VERSION_FILE")"   "$(kubectl version --client=true -o yaml 2>/dev/null | awk '/gitVersion/{print $2; exit}')"
-  vrow helm       "$(yqr '.kubernetes.helm' "$DEVBOX_VERSION_FILE")"      "$(installed_version helm version --short)"
-  vrow trivy      "$(yqr '.security.trivy' "$DEVBOX_VERSION_FILE")"       "$(trivy --version 2>/dev/null | awk 'NR==1{print $2}')"
-  vrow opa        "$(yqr '.security.opa' "$DEVBOX_VERSION_FILE")"         "$(opa version 2>/dev/null | awk '/^Version/{print $2}')"
-  vrow go         "$(yqr '.languages.go' "$DEVBOX_VERSION_FILE")"         "$(go version 2>/dev/null | awk '{print $3}')"
-  vrow node       "$(yqr '.languages.node_major' "$DEVBOX_VERSION_FILE").x"    "$(installed_version node --version)"
-  vrow python     "$(yqr '.languages.python' "$DEVBOX_VERSION_FILE")"     "$(installed_version python3 --version)"
+  vrow terraform "$(yqr '.iac.terraform' "$DEVBOX_VERSION_FILE")" "$(installed_version terraform version)"
+  vrow opentofu "$(yqr '.iac.opentofu' "$DEVBOX_VERSION_FILE")" "$(installed_version tofu version)"
+  vrow terragrunt "$(yqr '.iac.terragrunt' "$DEVBOX_VERSION_FILE")" "$(installed_version terragrunt --version)"
+  vrow tflint "$(yqr '.iac.tflint' "$DEVBOX_VERSION_FILE")" "$(installed_version tflint --version)"
+  vrow checkov "$(yqr '.iac.checkov' "$DEVBOX_VERSION_FILE")" "$(installed_version checkov --version)"
+  vrow kubectl "$(yqr '.kubernetes.kubectl' "$DEVBOX_VERSION_FILE")" "$(kubectl version --client=true -o yaml 2>/dev/null | awk '/gitVersion/{print $2; exit}')"
+  vrow helm "$(yqr '.kubernetes.helm' "$DEVBOX_VERSION_FILE")" "$(installed_version helm version --short)"
+  vrow trivy "$(yqr '.security.trivy' "$DEVBOX_VERSION_FILE")" "$(trivy --version 2>/dev/null | awk 'NR==1{print $2}')"
+  vrow opa "$(yqr '.security.opa' "$DEVBOX_VERSION_FILE")" "$(opa version 2>/dev/null | awk '/^Version/{print $2}')"
+  vrow go "$(yqr '.languages.go' "$DEVBOX_VERSION_FILE")" "$(go version 2>/dev/null | awk '{print $3}')"
+  vrow node "$(yqr '.languages.node_major' "$DEVBOX_VERSION_FILE").x" "$(installed_version node --version)"
+  vrow python "$(yqr '.languages.python' "$DEVBOX_VERSION_FILE")" "$(installed_version python3 --version)"
   head2 "Channel-pinned (updated by \`devbox update ai\`)"
-  vrow claude     "$(yqr '.ai.claude_code' "$DEVBOX_VERSION_FILE")"       "$(installed_version claude --version)"
-  vrow codex      "$(yqr '.ai.codex' "$DEVBOX_VERSION_FILE")"             "$(installed_version codex --version)"
+  vrow claude "$(yqr '.ai.claude_code' "$DEVBOX_VERSION_FILE")" "$(installed_version claude --version)"
+  vrow codex "$(yqr '.ai.codex' "$DEVBOX_VERSION_FILE")" "$(installed_version codex --version)"
   printf '\n'
 }
 
 cmd_update() {
   local what="${1:-all}"
   case "$what" in
-    ai|all)
+    ai | all)
       head2 "Updating AI clients (channel-pinned)"
       npm install -g --no-fund --no-audit @anthropic-ai/claude-code@latest @openai/codex@latest || warned "npm update failed"
-      audit_log update "ai clients" ;;&
-    mcp|all)
+      audit_log update "ai clients"
+      ;;&
+    mcp | all)
       head2 "Updating MCP servers"
       npm update -g --no-fund --no-audit 2>/dev/null || true
-      audit_log update "mcp servers" ;;&
-    all) head2 "Refreshing scanner databases"
-         trivy image --download-db-only 2>/dev/null || warned "trivy db refresh failed"
-         grype db update 2>/dev/null || true ;;
+      audit_log update "mcp servers"
+      ;;&
+    all)
+      head2 "Refreshing scanner databases"
+      trivy image --download-db-only 2>/dev/null || warned "trivy db refresh failed"
+      grype db update 2>/dev/null || true
+      ;;
     *) abort "usage: devbox update [ai|mcp|all]" ;;
   esac
   pass "update complete — run 'devbox versions' to confirm"
@@ -396,14 +436,21 @@ cmd_update() {
 # =============================================================================
 TF_BIN="${DEVBOX_TF_BIN:-terraform}"
 tf_dirs_or_die() {
-  local dirs; dirs="$(terraform_dirs "${1:-.}")"
-  [ -n "$dirs" ] || { warned "no Terraform files found under ${1:-.}"; return 1; }
+  local dirs
+  dirs="$(terraform_dirs "${1:-.}")"
+  [ -n "$dirs" ] || {
+    warned "no Terraform files found under ${1:-.}"
+    return 1
+  }
   printf '%s\n' "$dirs"
 }
 
 tf_fmt() {
   head2 "terraform fmt"
-  if "$TF_BIN" fmt -recursive "${1:-.}"; then pass "formatted"; else fail "fmt failed"; return 1; fi
+  if "$TF_BIN" fmt -recursive "${1:-.}"; then pass "formatted"; else
+    fail "fmt failed"
+    return 1
+  fi
 }
 
 tf_fmt_check() {
@@ -429,16 +476,17 @@ tf_validate() {
     # The init failure is reported on its own rather than folded into the
     # validate failure: "Module not installed" is a confusing way to say
     # "the directory is read-only" or "the registry is unreachable".
-    if ! ( cd "$d" && "$TF_BIN" init -backend=false -input=false -no-color >/dev/null 2>&1 ); then
+    if ! (cd "$d" && "$TF_BIN" init -backend=false -input=false -no-color >/dev/null 2>&1); then
       fail "$d — init failed (cannot fetch providers/modules)"
-      ( cd "$d" && "$TF_BIN" init -backend=false -input=false -no-color 2>&1 | sed 's/^/      /' | head -8 )
-      rc=1; continue
+      (cd "$d" && "$TF_BIN" init -backend=false -input=false -no-color 2>&1 | sed 's/^/      /' | head -8)
+      rc=1
+      continue
     fi
-    if ( cd "$d" && "$TF_BIN" validate -no-color >/dev/null 2>&1 ); then
+    if (cd "$d" && "$TF_BIN" validate -no-color >/dev/null 2>&1); then
       pass "$d"
     else
       fail "$d"
-      ( cd "$d" && "$TF_BIN" validate -no-color 2>&1 | sed 's/^/      /' )
+      (cd "$d" && "$TF_BIN" validate -no-color 2>&1 | sed 's/^/      /')
       rc=1
     fi
   done < <(tf_dirs_or_die "${1:-.}")
@@ -448,7 +496,10 @@ tf_validate() {
 tf_lint() {
   local target="${1:-.}"
   head2 "tflint"
-  have tflint || { warned "tflint not installed"; return 0; }
+  have tflint || {
+    warned "tflint not installed"
+    return 0
+  }
 
   local -a args=(--recursive --format compact)
   # A repo-local .tflint.hcl always wins; otherwise use the one shipped with the
@@ -475,8 +526,11 @@ tf_security() {
   head2 "security analysis (checkov + trivy config)"
   local rc=0
   if have checkov; then
-    checkov -d "${1:-.}" --framework terraform --compact --quiet --skip-download 2>/dev/null \
-      && pass "checkov clean" || { warned "checkov reported findings"; rc=1; }
+    checkov -d "${1:-.}" --framework terraform --compact --quiet --skip-download 2>/dev/null &&
+      pass "checkov clean" || {
+      warned "checkov reported findings"
+      rc=1
+    }
   else warned "checkov not installed"; fi
   if have trivy; then
     trivy config --quiet --exit-code 0 "${1:-.}" && pass "trivy config complete"
@@ -493,19 +547,26 @@ tf_policy() {
   local policy_dir="${DEVBOX_ROOT}/security/policy/terraform"
   [ -d "$(repo_root)/security/policy/terraform" ] && policy_dir="$(repo_root)/security/policy/terraform"
   if ! have conftest || [ ! -d "$policy_dir" ]; then
-    skip "no Terraform Rego policies found — skipping"; return 0
+    skip "no Terraform Rego policies found — skipping"
+    return 0
   fi
   # Policies here evaluate the HCL directly; plan-JSON policies are applied in CI
   # where a plan actually exists. Running `terraform plan` from a validation
   # command would touch remote state, which this command must never do.
-  conftest test --policy "$policy_dir" --all-namespaces "${1:-.}" 2>/dev/null \
-    && pass "policy clean" || { warned "policy findings (see above)"; return 1; }
+  conftest test --policy "$policy_dir" --all-namespaces "${1:-.}" 2>/dev/null &&
+    pass "policy clean" || {
+    warned "policy findings (see above)"
+    return 1
+  }
 }
 
 tf_docs() {
   local mode="${1:-write}" target="${2:-.}"
   head2 "terraform-docs"
-  have terraform-docs || { warned "terraform-docs not installed"; return 0; }
+  have terraform-docs || {
+    warned "terraform-docs not installed"
+    return 0
+  }
   local d rc=0
   # Always run from *inside* each module directory. terraform-docs resolves
   # provider versions from the nearest .terraform.lock.hcl, so invoking it as
@@ -516,8 +577,8 @@ tf_docs() {
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     if [ "$mode" = check ]; then
-      if ( cd "$d" && terraform-docs markdown table --output-file README.md \
-             --output-mode inject --output-check . >/dev/null 2>&1 ); then
+      if (cd "$d" && terraform-docs markdown table --output-file README.md \
+        --output-mode inject --output-check . >/dev/null 2>&1); then
         pass "$d docs current"
       else
         fail "$d docs out of date — run: devbox terraform docs"
@@ -527,13 +588,13 @@ tf_docs() {
       # Report the failure rather than swallowing it. A silent no-op here means
       # "docs are current" to the next reader, which is exactly wrong when the
       # real cause is an unwritable README.
-      if ( cd "$d" && terraform-docs markdown table --output-file README.md \
-             --output-mode inject . >/dev/null 2>&1 ); then
+      if (cd "$d" && terraform-docs markdown table --output-file README.md \
+        --output-mode inject . >/dev/null 2>&1); then
         pass "$d docs generated"
       else
         fail "$d docs generation failed"
-        ( cd "$d" && terraform-docs markdown table --output-file README.md \
-            --output-mode inject . 2>&1 | sed 's/^/      /' | head -5 )
+        (cd "$d" && terraform-docs markdown table --output-file README.md \
+          --output-mode inject . 2>&1 | sed 's/^/      /' | head -5)
         rc=1
       fi
     fi
@@ -542,28 +603,30 @@ tf_docs() {
 }
 
 cmd_terraform() {
-  local sub="${1:-check}"; shift || true
+  local sub="${1:-check}"
+  shift || true
   case "$sub" in
-    fmt)      tf_fmt "${1:-.}" ;;
+    fmt) tf_fmt "${1:-.}" ;;
     validate) tf_validate "${1:-.}" ;;
-    lint)     tf_lint "${1:-.}" ;;
+    lint) tf_lint "${1:-.}" ;;
     security) tf_security "${1:-.}" ;;
-    policy)   tf_policy "${1:-.}" ;;
-    docs)     if [ "${1:-}" = "--check" ]; then tf_docs check "${2:-.}"; else tf_docs write "${1:-.}"; fi ;;
+    policy) tf_policy "${1:-.}" ;;
+    docs) if [ "${1:-}" = "--check" ]; then tf_docs check "${2:-.}"; else tf_docs write "${1:-.}"; fi ;;
     check)
       local target="${1:-.}" rc=0
       head1 "devbox terraform check — ${target}"
       info "read-only: no init against a backend, no plan, no apply"
-      tf_fmt_check "$target"  || rc=1
-      tf_validate "$target"   || rc=1
-      tf_lint "$target"       || rc=1
-      tf_security "$target"   || rc=1
-      tf_policy "$target"     || rc=1
+      tf_fmt_check "$target" || rc=1
+      tf_validate "$target" || rc=1
+      tf_lint "$target" || rc=1
+      tf_security "$target" || rc=1
+      tf_policy "$target" || rc=1
       tf_docs check "$target" || rc=1
       printf '\n'
       if [ $rc -eq 0 ]; then pass "all Terraform checks passed"; else fail "one or more Terraform checks failed"; fi
       audit_log terraform-check "target=${target} rc=${rc}"
-      return $rc ;;
+      return $rc
+      ;;
     *) abort "unknown: devbox terraform $sub" ;;
   esac
 }
@@ -575,12 +638,13 @@ cmd_github() {
   local sub="${1:-check}"
   case "$sub" in
     check)
-      local root; root="$(repo_root)"
+      local root
+      root="$(repo_root)"
       head1 "devbox github check"
       local rc=0
       head2 "actionlint"
       if have actionlint && [ -d "${root}/.github/workflows" ]; then
-        ( cd "$root" && actionlint -color ) && pass "workflows valid" || rc=1
+        (cd "$root" && actionlint -color) && pass "workflows valid" || rc=1
       else skip "no .github/workflows or actionlint missing"; fi
 
       head2 "yamllint"
@@ -603,9 +667,11 @@ cmd_github() {
       head2 "action pinning"
       if [ -d "${root}/.github/workflows" ]; then
         local unpinned
+        # .github/actions too: a composite action is exactly where an unpinned
+        # third-party dependency would hide from a workflows-only scan.
         unpinned="$(grep -rhoE 'uses:[[:space:]]*[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[A-Za-z0-9._/-]+' \
-                    "${root}/.github/workflows" 2>/dev/null \
-                    | grep -vE '@[0-9a-f]{40}$' | sort -u || true)"
+          "${root}/.github/workflows" "${root}/.github/actions" 2>/dev/null |
+          grep -vE '@[0-9a-f]{40}$' | sort -u || true)"
         if [ -n "$unpinned" ]; then
           warned "third-party actions not pinned to a commit SHA (mutable tags):"
           printf '%s\n' "$unpinned" | sed 's/^/      /'
@@ -616,7 +682,8 @@ cmd_github() {
       printf '\n'
       [ $rc -eq 0 ] && pass "GitHub checks passed" || fail "GitHub checks failed"
       audit_log github-check "rc=${rc}"
-      return $rc ;;
+      return $rc
+      ;;
     *) abort "unknown: devbox github $sub" ;;
   esac
 }
@@ -625,7 +692,8 @@ cmd_github() {
 # security
 # =============================================================================
 cmd_security() {
-  local sub="${1:-scan}"; shift || true
+  local sub="${1:-scan}"
+  shift || true
   case "$sub" in
     scan) exec "${DEVBOX_ROOT}/scripts/security/scan.sh" "$@" ;;
     sbom) exec "${DEVBOX_ROOT}/scripts/security/sbom.sh" "$@" ;;
@@ -637,22 +705,27 @@ cmd_security() {
 # dispatch
 # =============================================================================
 main() {
-  local cmd="${1:-help}"; shift || true
+  local cmd="${1:-help}"
+  shift || true
   case "$cmd" in
-    status)     cmd_status "$@" ;;
-    doctor)     cmd_doctor "$@" ;;
-    info)       cmd_info "$@" ;;
-    versions)   cmd_versions "$@" ;;
-    update)     cmd_update "$@" ;;
-    terraform|tf) cmd_terraform "$@" ;;
-    github|gh)  cmd_github "$@" ;;
-    security)   cmd_security "$@" ;;
-    ai)         exec ai "$@" ;;
-    mcp)        exec mcp "$@" ;;
-    banner)     cmd_banner ;;
-    version|--version) say "devbox $DEVBOX_SELF_VERSION ($(devbox_image_version))" ;;
-    help|--help|-h) usage ;;
-    *) err "unknown command: $cmd"; usage; exit 1 ;;
+    status) cmd_status "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    info) cmd_info "$@" ;;
+    versions) cmd_versions "$@" ;;
+    update) cmd_update "$@" ;;
+    terraform | tf) cmd_terraform "$@" ;;
+    github | gh) cmd_github "$@" ;;
+    security) cmd_security "$@" ;;
+    ai) exec ai "$@" ;;
+    mcp) exec mcp "$@" ;;
+    banner) cmd_banner ;;
+    version | --version) say "devbox $DEVBOX_SELF_VERSION ($(devbox_image_version))" ;;
+    help | --help | -h) usage ;;
+    *)
+      err "unknown command: $cmd"
+      usage
+      exit 1
+      ;;
   esac
 }
 

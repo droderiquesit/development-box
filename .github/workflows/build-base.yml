@@ -1,11 +1,23 @@
 ---
 # =============================================================================
-# Build and publish the BASE image.
+# BASE image — build, test, publish.
 # =============================================================================
-# Runs only when something in the base actually changes — the OS package list,
-# the language runtimes, the shell, or the version manifest. That is the whole
-# point of splitting the images: a change to an AI prompt must not trigger a
-# 20-minute rebuild of the Go toolchain layer.
+# The base carries the slow-moving foundation: Ubuntu 24.04 LTS, the non-root
+# `dev` user, Go/Node/Python + uv, and the shell. It changes for two reasons
+# only — an OS security patch, or a language runtime bump.
+#
+# It is published to GHCR as an INDEPENDENTLY VERSIONED artefact. The DevBox
+# build pulls a pinned release of it; it never rebuilds the base as a side
+# effect. That separation is what makes base patching possible:
+#
+#   1. an OS CVE lands, or the weekly schedule fires
+#   2. tag `base-v1.0.1`  -> this workflow publishes base 1.0.1
+#   3. bump `release.base` in versions.yaml to 1.0.1 in a PR
+#   4. build-devbox rebuilds the DevBox on the patched base and runs the full
+#      test suite against it BEFORE anything ships
+#
+# Step 4 is why the pin is a file and not a floating tag. `:latest` would give
+# you the patch with no test gate and no way to roll back except a revert race.
 name: build-base
 
 "on":
@@ -20,6 +32,8 @@ name: build-base
       - 'config/shell/**'
       - 'config/ca-certificates/**'
       - '.github/workflows/build-base.yml'
+      - '.github/scripts/**'
+    tags: ['base-v*.*.*']
   pull_request:
     paths:
       - 'Containerfile.base'
@@ -29,20 +43,30 @@ name: build-base
       - 'config/shell/**'
   schedule:
     # Weekly, so OS security updates land without anyone remembering to ask.
+    # This publishes :edge only — promoting a patch to a release is a human
+    # tagging `base-v*`, because that is what starts the test-and-pin flow above.
     - cron: '0 5 * * 1'
   workflow_dispatch:
     inputs:
       push_image:
-        description: Push to the registry
+        description: Push to the registry (untagged builds publish :edge only)
         type: boolean
         default: false
 
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash            # bash -eo pipefail; the default `bash -e` has no pipefail
+
 env:
   REGISTRY: ghcr.io
-  IMAGE: ${{ github.repository }}-base
+  # Layer cache lives in GHCR beside the image it caches. One cache repo across
+  # branches is deliberate: a branch touching only the shell profile reuses
+  # main's OS and language layers. Entries are content-addressed, so a changed
+  # instruction misses rather than returning something stale.
+  CACHE_REPO: ghcr.io/${{ github.repository }}-base/buildcache
 
 concurrency:
   group: build-base-${{ github.ref }}
@@ -75,25 +99,45 @@ jobs:
       - name: podman version
         run: podman version
 
-      - name: derive tags
+      - name: derive metadata
         id: meta
         run: |
+          set -euo pipefail
+          # `base-v1.0.1` -> 1.0.1. Anything else is not a release build and
+          # takes its version from the pin, purely for image labels.
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version="${GITHUB_REF_NAME#base-v}"
+          else
+            version="$(.github/scripts/image-ref.sh base-version)"
+          fi
           {
             echo "sha=$(git rev-parse --short HEAD)"
             echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "version=$(git describe --tags --always --dirty)"
-            echo "arch=${{ matrix.platform }}" | tr '/' '-'
+            echo "version=${version}"
+            echo "arch=$(echo '${{ matrix.platform }}' | tr '/' '-')"
+            echo "repo=$(.github/scripts/image-ref.sh base-repo)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: build
+      # Log in before building: --cache-from READS from GHCR, so an anonymous
+      # build silently misses every entry on a private repository and merely
+      # looks slow rather than misconfigured.
+      - name: log in to the registry
         run: |
-          podman build \
-            -f Containerfile.base \
-            -t "localhost/base:${{ steps.meta.outputs.sha }}" \
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: build
+        env:
+          # Only trusted events may WRITE the cache. A pull request, especially
+          # from a fork, must never be able to poison the layers main builds on.
+          CACHE_PUSH: ${{ (github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) && '1' || '0' }}
+        run: |
+          .github/scripts/podman-build.sh \
+            Containerfile.base \
+            "localhost/base:${{ steps.meta.outputs.sha }}" \
             --build-arg VCS_REF="${{ steps.meta.outputs.sha }}" \
             --build-arg BUILD_DATE="${{ steps.meta.outputs.date }}" \
-            --build-arg VERSION="${{ steps.meta.outputs.version }}" \
-            .
+            --build-arg VERSION="${{ steps.meta.outputs.version }}"
 
       - name: smoke test
         run: |
@@ -109,20 +153,25 @@ jobs:
             echo "base image smoke test passed"
           '
 
+      - uses: ./.github/actions/go-tools
+        with:
+          tools: >-
+            github.com/anchore/syft/cmd/syft@v1.51.0
+            github.com/anchore/grype/cmd/grype@v0.117.0
+            github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
+
       - name: SBOM
         run: |
-          go install github.com/anchore/syft/cmd/syft@v1.51.0
-          "$(go env GOPATH)/bin/syft" scan \
+          syft scan \
             "containers-storage:localhost/base:${{ steps.meta.outputs.sha }}" \
             -o spdx-json=base.spdx.json -o cyclonedx-json=base.cdx.json
 
       - name: vulnerability scan
         run: |
-          go install github.com/anchore/grype/cmd/grype@v0.117.0
           # Report, do not fail the build: a base-image CVE with no upstream fix
           # must be visible without blocking every unrelated change. The
           # scheduled rebuild is what actually resolves them.
-          "$(go env GOPATH)/bin/grype" sbom:base.cdx.json -o table --fail-on '' || true
+          grype sbom:base.cdx.json -o table --fail-on '' || true
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -130,53 +179,139 @@ jobs:
           path: base.*.json
           retention-days: 30
 
-      # --- publish (main branch or explicit dispatch only) -------------------
-      - name: log in to the registry
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.push_image)
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | \
-            podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
-
-      - name: push
+      # --- publish per-architecture ------------------------------------------
+      # Always sha+arch tagged. The human-facing semver ladder is applied by the
+      # `publish` job once BOTH architectures exist — pushing `:1.0.1` from one
+      # arch would leave half the world with a broken pull.
+      - name: push arch image
         id: push
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.push_image)
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag' || inputs.push_image)
         run: |
           set -euo pipefail
-          arch=$(echo "${{ matrix.platform }}" | tr '/' '-')
-          dest="$REGISTRY/${IMAGE,,}"
-          podman tag "localhost/base:${{ steps.meta.outputs.sha }}" "$dest:${{ steps.meta.outputs.sha }}-$arch"
-          podman push "$dest:${{ steps.meta.outputs.sha }}-$arch"
-          echo "digest=$(podman inspect --format '{{index .RepoDigests 0}}' "$dest:${{ steps.meta.outputs.sha }}-$arch")" >> "$GITHUB_OUTPUT"
+          dest="${{ steps.meta.outputs.repo }}"
+          ref="$dest:${{ steps.meta.outputs.sha }}-${{ steps.meta.outputs.arch }}"
+          podman tag "localhost/base:${{ steps.meta.outputs.sha }}" "$ref"
+          podman push "$ref"
+          echo "digest=$(podman inspect --format '{{index .RepoDigests 0}}' "$ref")" >> "$GITHUB_OUTPUT"
 
       - name: sign (keyless)
         if: steps.push.outcome == 'success'
         run: |
-          go install github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
           # Keyless: the signature is bound to this workflow's OIDC identity, so
           # there is no signing key to store, rotate or leak.
-          COSIGN_EXPERIMENTAL=1 "$(go env GOPATH)/bin/cosign" sign --yes \
-            "${{ steps.push.outputs.digest }}"
+          COSIGN_EXPERIMENTAL=1 cosign sign --yes "${{ steps.push.outputs.digest }}"
 
-  manifest:
-    name: multi-arch manifest
+  # ---------------------------------------------------------------------------
+  # Multi-arch manifest, plus the semver ladder and release for a `base-v*` tag.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: manifest and tags
     needs: build
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.push_image)
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag' || inputs.push_image)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
-      contents: read
+      contents: write        # a `base-v*` tag also cuts a GitHub release
       packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: assemble and push the manifest list
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/go-tools
+        with:
+          tools: github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
+
+      - name: assemble the manifest list
+        id: manifest
         run: |
           set -euo pipefail
-          sha=$(git rev-parse --short HEAD)
-          dest="$REGISTRY/${IMAGE,,}"
+          sha="$(git rev-parse --short HEAD)"
+          dest="$(.github/scripts/image-ref.sh base-repo)"
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
-          podman manifest create "$dest:latest"
+
+          podman manifest create localhost/base-manifest
           for arch in linux-amd64 linux-arm64; do
-            podman manifest add "$dest:latest" "docker://$dest:$sha-$arch"
+            podman manifest add localhost/base-manifest "docker://$dest:$sha-$arch"
           done
-          podman manifest push --all "$dest:latest" "docker://$dest:latest"
-          podman manifest push --all "$dest:latest" "docker://$dest:$sha"
+          # The sha tag is this build's immutable identity, published always.
+          podman manifest push --all localhost/base-manifest "docker://$dest:$sha"
+          {
+            echo "dest=$dest"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: publish :edge (untagged builds)
+        if: github.ref_type != 'tag'
+        run: |
+          # `edge` is the tip of main: built and smoke-tested, but not a release.
+          # versions.yaml is never allowed to point at it.
+          podman manifest push --all localhost/base-manifest \
+            "docker://${{ steps.manifest.outputs.dest }}:edge"
+
+      - name: publish the semver ladder
+        id: release
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#base-v}"
+          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not carry a bare MAJOR.MINOR.PATCH version"
+            exit 1
+          fi
+          dest="${{ steps.manifest.outputs.dest }}"
+          # A consumer picks the precision they want to be surprised at:
+          # :1.0.1 never moves, :1.0 tracks OS patches, :1 tracks minors.
+          for t in "$version" "${version%.*}" "${version%%.*}" latest; do
+            podman manifest push --all localhost/base-manifest "docker://$dest:$t"
+            echo "pushed $dest:$t"
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: sign the release
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          dest="${{ steps.manifest.outputs.dest }}"
+          version="${{ steps.release.outputs.version }}"
+          # Sign by digest, never by tag: a tag can be moved, and a signature
+          # over a movable name certifies nothing.
+          digest="$(skopeo inspect --format '{{.Digest}}' "docker://$dest:$version" 2>/dev/null || true)"
+          if [ -z "$digest" ]; then
+            echo "::warning::could not resolve a digest for $dest:$version — not signing a mutable tag"
+            exit 0
+          fi
+          COSIGN_EXPERIMENTAL=1 cosign sign --yes "${dest}@${digest}"
+
+      - name: GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          dest="${{ steps.manifest.outputs.dest }}"
+          notes="$(mktemp)"
+          {
+            echo "## Base image \`${version}\`"
+            echo
+            echo "The DevBox foundation: Ubuntu 24.04 LTS, non-root \`dev\` user,"
+            echo "Go / Node / Python + uv, shell profile. linux/amd64 + linux/arm64."
+            echo
+            echo '```'
+            echo "podman pull ${dest}:${version}"
+            echo '```'
+            echo
+            echo "### Adopting this base"
+            echo
+            echo "Set \`release.base\` in \`versions.yaml\` to \`${version}\` and open a PR."
+            echo "build-devbox then rebuilds the DevBox on it and runs the full test"
+            echo "suite before anything ships — that gate is the point of the pin."
+            echo
+            echo "Tags published: \`${version}\`, \`${version%.*}\`, \`${version%%.*}\`, \`latest\`"
+          } > "$notes"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Base image ${version}" \
+            --notes-file "$notes" \
+            --verify-tag

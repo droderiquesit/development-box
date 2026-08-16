@@ -40,7 +40,8 @@ EOF
 registry() {
   # A user copy under ~/.config/devbox/mcp overrides the image default, so
   # enable/disable survives a container rebuild.
-  if [ -r "$MCP_USER_REGISTRY" ]; then printf '%s' "$MCP_USER_REGISTRY"
+  if [ -r "$MCP_USER_REGISTRY" ]; then
+    printf '%s' "$MCP_USER_REGISTRY"
   else printf '%s' "$MCP_SERVERS_FILE"; fi
 }
 
@@ -57,19 +58,24 @@ server_field() { yqr ".servers.${1}.${2}" "$(registry)" "${3:-}"; }
 
 # Is this server permitted by the active trust profile?
 allowed_by_profile() {
-  local name="$1" prof; prof="$(active_mcp_profile)"
-  local allowed; allowed="$(yqr ".profiles.${prof}.allowed_servers" "$MCP_PROFILES_FILE" '')"
+  local name="$1" prof
+  prof="$(active_mcp_profile)"
+  local allowed
+  allowed="$(yqr ".profiles.${prof}.allowed_servers" "$MCP_PROFILES_FILE" '')"
   if [ "$allowed" = "*" ]; then :; else
-    yq -r ".profiles.${prof}.allowed_servers[]?" "$MCP_PROFILES_FILE" 2>/dev/null \
-      | grep -qx "$name" || return 1
+    yq -r ".profiles.${prof}.allowed_servers[]?" "$MCP_PROFILES_FILE" 2>/dev/null |
+      list_has "$name" || return 1
   fi
   # Trust level must be within the profile's ceiling.
-  local trust; trust="$(server_field "$name" trust medium)"
-  yq -r ".profiles.${prof}.allowed_trust_levels[]?" "$MCP_PROFILES_FILE" 2>/dev/null \
-    | grep -qx "$trust" || return 1
+  local trust
+  trust="$(server_field "$name" trust medium)"
+  yq -r ".profiles.${prof}.allowed_trust_levels[]?" "$MCP_PROFILES_FILE" 2>/dev/null |
+    list_has "$trust" || return 1
   # A read-only profile cannot expose a read-write server as read-write.
-  local maxacc; maxacc="$(yqr ".profiles.${prof}.max_access" "$MCP_PROFILES_FILE" read-only)"
-  local acc; acc="$(server_field "$name" access read-only)"
+  local maxacc
+  maxacc="$(yqr ".profiles.${prof}.max_access" "$MCP_PROFILES_FILE" read-only)"
+  local acc
+  acc="$(server_field "$name" access read-only)"
   if [ "$maxacc" = "read-only" ] && [ "$acc" = "read-write" ]; then return 2; fi
   return 0
 }
@@ -87,12 +93,13 @@ cmd_list() {
     ac="$(server_field "$n" access read-only)"
     tp="$(server_field "$n" transport stdio)"
     case "$tr" in
-      high)       col="$GRN" ;;
-      medium)     col="$YLW" ;;
+      high) col="$GRN" ;;
+      medium) col="$YLW" ;;
       restricted) col="$RED" ;;
-      *)          col="$D" ;;
+      *) col="$D" ;;
     esac
-    local mark="  "; [ "$en" = "true" ] && mark="${GRN}▸ ${R}"
+    local mark="  "
+    [ "$en" = "true" ] && mark="${GRN}▸ ${R}"
     printf '%s%-22s %-9s %s%-12s%s %-11s %s\n' "$mark" "$n" "$en" "$col" "$tr" "$R" "$ac" "$tp"
   done < <(yq -r '.servers | keys | .[]' "$(registry)" 2>/dev/null)
 
@@ -100,10 +107,12 @@ cmd_list() {
 }
 
 cmd_status() {
-  local prof; prof="$(active_mcp_profile)"
+  local prof
+  prof="$(active_mcp_profile)"
   head1 "MCP STATUS"
   info "trust profile ${B}${prof}${R} — $(yqr ".profiles.${prof}.description" "$MCP_PROFILES_FILE" '')"
-  local maxacc; maxacc="$(yqr ".profiles.${prof}.max_access" "$MCP_PROFILES_FILE" read-only)"
+  local maxacc
+  maxacc="$(yqr ".profiles.${prof}.max_access" "$MCP_PROFILES_FILE" read-only)"
   info "ceiling: ${maxacc}; credentials passed through: $(yq -r ".profiles.${prof}.credentials.passthrough | if length==0 then \"none\" else join(\", \") end" "$MCP_PROFILES_FILE" 2>/dev/null)"
 
   head2 "Exposed to clients"
@@ -113,8 +122,14 @@ cmd_status() {
     [ "$(server_field "$n" enabled false)" = "true" ] || continue
     allowed_by_profile "$n"
     case $? in
-      0) pass "$(printf '%-22s %s' "$n" "${D}$(server_field "$n" access) · $(server_field "$n" transport)${R}")"; any=1 ;;
-      2) warned "$(printf '%-22s %s' "$n" "downgraded to read-only by the ${prof} profile")"; any=1 ;;
+      0)
+        pass "$(printf '%-22s %s' "$n" "${D}$(server_field "$n" access) · $(server_field "$n" transport)${R}")"
+        any=1
+        ;;
+      2)
+        warned "$(printf '%-22s %s' "$n" "downgraded to read-only by the ${prof} profile")"
+        any=1
+        ;;
       *) skip "$(printf '%-22s %s' "$n" "enabled, but blocked by the ${prof} profile")" ;;
     esac
   done < <(yq -r '.servers | keys | .[]' "$(registry)" 2>/dev/null)
@@ -140,7 +155,8 @@ cmd_status() {
 }
 
 cmd_describe() {
-  local n="${1:-}"; [ -n "$n" ] || abort "usage: mcp describe <name>"
+  local n="${1:-}"
+  [ -n "$n" ] || abort "usage: mcp describe <name>"
   [ "$(server_field "$n" trust '')" != "" ] || abort "no such server: ${n}"
   head1 "MCP SERVER: ${n}"
   yq -r ".servers.${n}" "$(registry)" 2>/dev/null | sed 's/^/  /'
@@ -155,9 +171,11 @@ cmd_describe() {
 }
 
 cmd_enable() {
-  local n="${1:-}"; [ -n "$n" ] || abort "usage: mcp enable <name>"
+  local n="${1:-}"
+  [ -n "$n" ] || abort "usage: mcp enable <name>"
   [ "$(server_field "$n" trust '')" != "" ] || abort "no such server: ${n}   (mcp list)"
-  local trust; trust="$(server_field "$n" trust medium)"
+  local trust
+  trust="$(server_field "$n" trust medium)"
 
   # Restricted-trust servers get a real gate, not a log line.
   if [ "$trust" = restricted ]; then
@@ -171,13 +189,19 @@ cmd_enable() {
           info "Bind a ServiceAccount with the 'view' ClusterRole and point KUBECONFIG at it."
           audit_log mcp-enable-refused "server=${n} reason=no-readonly-kubeconfig"
           return 1
-        fi ;;
+        fi
+        ;;
       aws)
-        printf '\n  %sUse a read-only IAM role. Never an admin profile.%s\n' "$YLW" "$R" ;;
+        printf '\n  %sUse a read-only IAM role. Never an admin profile.%s\n' "$YLW" "$R"
+        ;;
     esac
     [ "${DEVBOX_ASSUME_YES:-0}" = "1" ] || {
       read -r -p "  enable anyway? [y/N] " reply
-      case "$reply" in y|Y|yes|YES) ;; *) say "  cancelled."; return 1 ;; esac
+      case "$reply" in y | Y | yes | YES) ;; *)
+        say "  cancelled."
+        return 1
+        ;;
+      esac
     }
   fi
 
@@ -186,12 +210,14 @@ cmd_enable() {
   audit_log mcp-enable "server=${n} trust=${trust}"
   pass "enabled ${n}"
   cmd_render --quiet
-  local prof; prof="$(active_mcp_profile)"
+  local prof
+  prof="$(active_mcp_profile)"
   allowed_by_profile "$n" || warned "enabled, but the ${prof} trust profile still blocks it — switch profile to expose it"
 }
 
 cmd_disable() {
-  local n="${1:-}"; [ -n "$n" ] || abort "usage: mcp disable <name>"
+  local n="${1:-}"
+  [ -n "$n" ] || abort "usage: mcp disable <name>"
   [ "$(server_field "$n" trust '')" != "" ] || abort "no such server: ${n}"
   ensure_user_registry
   yq -i ".servers.${n}.enabled = false" "$MCP_USER_REGISTRY"
@@ -203,34 +229,43 @@ cmd_disable() {
 cmd_profile() {
   local name="${1:-}"
   if [ -z "$name" ]; then
-    local p; p="$(active_mcp_profile)"
+    local p
+    p="$(active_mcp_profile)"
     head1 "MCP TRUST PROFILE: ${p}"
     yq -r ".profiles.${p}" "$MCP_PROFILES_FILE" 2>/dev/null | sed 's/^/  /'
-    printf '\n'; return
+    printf '\n'
+    return
   fi
   if [ "$name" = list ]; then
     head1 "MCP TRUST PROFILES"
     local p
     while IFS= read -r p; do
       [ -n "$p" ] || continue
-      local mark="  "; [ "$p" = "$(active_mcp_profile)" ] && mark="${GRN}▸ ${R}"
+      local mark="  "
+      [ "$p" = "$(active_mcp_profile)" ] && mark="${GRN}▸ ${R}"
       printf '%s%-13s %s%s%s\n' "$mark" "$p" "$D" "$(yqr ".profiles.${p}.description" "$MCP_PROFILES_FILE" '')" "$R"
     done < <(yq -r '.profiles | keys | .[]' "$MCP_PROFILES_FILE" 2>/dev/null)
-    printf '\n'; return
+    printf '\n'
+    return
   fi
-  [ "$(yqr ".profiles.${name}.description" "$MCP_PROFILES_FILE" '')" != "" ] \
-    || abort "unknown trust profile: ${name}   (mcp profile list)"
+  [ "$(yqr ".profiles.${name}.description" "$MCP_PROFILES_FILE" '')" != "" ] ||
+    abort "unknown trust profile: ${name}   (mcp profile list)"
 
   if [ "$(yqr ".profiles.${name}.requires_confirmation" "$MCP_PROFILES_FILE" false)" = "true" ]; then
     printf '\n%sElevating to %s%s\n' "$YLW" "$name" "$R"
     yq -r ".profiles.${name}.warnings[]?" "$MCP_PROFILES_FILE" 2>/dev/null | sed 's/^/  · /'
     [ "${DEVBOX_ASSUME_YES:-0}" = "1" ] || {
       read -r -p "  continue? [y/N] " reply
-      case "$reply" in y|Y|yes|YES) ;; *) say "  cancelled."; return 1 ;; esac
+      case "$reply" in y | Y | yes | YES) ;; *)
+        say "  cancelled."
+        return 1
+        ;;
+      esac
     }
     # session_only: recorded with an expiry so it cannot quietly become permanent.
-    local mins; mins="$(yqr ".profiles.${name}.max_duration_minutes" "$MCP_PROFILES_FILE" 60)"
-    state_set mcp-profile-expires "$(( $(date +%s) + mins * 60 ))"
+    local mins
+    mins="$(yqr ".profiles.${name}.max_duration_minutes" "$MCP_PROFILES_FILE" 60)"
+    state_set mcp-profile-expires "$(($(date +%s) + mins * 60))"
     warned "reverts to DEVELOPER in ${mins} minutes"
   else
     rm -f "${DEVBOX_STATE}/mcp-profile-expires" 2>/dev/null || true
@@ -244,7 +279,8 @@ cmd_profile() {
 
 # Enforce the PRIVILEGED expiry on every invocation.
 enforce_profile_expiry() {
-  local exp; exp="$(state_get mcp-profile-expires '')"
+  local exp
+  exp="$(state_get mcp-profile-expires '')"
   [ -n "$exp" ] || return 0
   if [ "$(date +%s)" -ge "$exp" ]; then
     state_set mcp-profile DEVELOPER
@@ -258,7 +294,8 @@ enforce_profile_expiry() {
 # render — registry ∩ profile ∩ policy  →  client configs
 # =============================================================================
 cmd_render() {
-  local quiet=0; [ "${1:-}" = "--quiet" ] && quiet=1
+  local quiet=0
+  [ "${1:-}" = "--quiet" ] && quiet=1
   local out_dir="${DEVBOX_MCP_CONFIG}/generated"
   install -d -m 0700 "$out_dir"
 
@@ -266,14 +303,17 @@ cmd_render() {
   while IFS= read -r n; do
     [ -n "$n" ] || continue
     [ "$(server_field "$n" enabled false)" = "true" ] || continue
-    allowed_by_profile "$n"; local st=$?
+    allowed_by_profile "$n"
+    local st=$?
     [ "$st" -eq 1 ] && continue
 
-    local transport; transport="$(server_field "$n" transport stdio)"
+    local transport
+    transport="$(server_field "$n" transport stdio)"
     local entry
     case "$transport" in
       container)
-        local image; image="$(server_field "$n" image '')"
+        local image
+        image="$(server_field "$n" image '')"
         # Container servers are hardened here, from mcp/policies.yaml, so a
         # registry entry cannot forget to drop capabilities.
         local -a cargs=()
@@ -281,13 +321,15 @@ cmd_render() {
           < <(yq -r ".servers.${n}.container_args[]?" "$(registry)" 2>/dev/null)
         while IFS= read -r a; do
           [ -n "$a" ] || continue
-          printf '%s\n' "${cargs[@]-}" | grep -qxF -- "$a" || cargs+=("$a")
+          printf '%s\n' "${cargs[@]-}" | list_has "$a" || cargs+=("$a")
         done < <(yq -r '.requirements.container_hardening.required_args[]?' "$MCP_POLICY_FILE" 2>/dev/null)
         entry="$(jq -n --arg cmd podman --arg img "$image" \
-                  --argjson args "$(printf '%s\n' "${cargs[@]-}" | jq -R . | jq -s .)" \
-                  '{command:$cmd, args:(["run"] + $args + [$img])}')" ;;
+          --argjson args "$(printf '%s\n' "${cargs[@]-}" | jq -R . | jq -s .)" \
+          '{command:$cmd, args:(["run"] + $args + [$img])}')"
+        ;;
       *)
-        local cmd; cmd="$(server_field "$n" command "$n")"
+        local cmd
+        cmd="$(server_field "$n" command "$n")"
         local -a sargs=()
         while IFS= read -r a; do
           [ -n "$a" ] || continue
@@ -296,8 +338,9 @@ cmd_render() {
           sargs+=("$a")
         done < <(yq -r ".servers.${n}.args[]?" "$(registry)" 2>/dev/null)
         entry="$(jq -n --arg cmd "$cmd" \
-                  --argjson args "$(printf '%s\n' "${sargs[@]-}" | grep -v '^$' | jq -R . | jq -s .)" \
-                  '{command:$cmd, args:$args}')" ;;
+          --argjson args "$(printf '%s\n' "${sargs[@]-}" | grep -v '^$' | jq -R . | jq -s .)" \
+          '{command:$cmd, args:$args}')"
+        ;;
     esac
     servers_json="$(printf '%s' "$servers_json" | jq --arg k "$n" --argjson v "$entry" '. + {($k): $v}')"
   done < <(yq -r '.servers | keys | .[]' "$(registry)" 2>/dev/null)
@@ -305,9 +348,9 @@ cmd_render() {
   # Canonical form, then per-client shapes. One renderer, several outputs — the
   # alternative is hand-maintaining the same list in four places and watching
   # them drift.
-  printf '%s' "$servers_json" | jq '{mcpServers: .}' > "${out_dir}/mcp.json"
+  printf '%s' "$servers_json" | jq '{mcpServers: .}' >"${out_dir}/mcp.json"
   cp "${out_dir}/mcp.json" "${out_dir}/claude_mcp.json"
-  printf '%s' "$servers_json" | jq '{mcp_servers: .}' > "${out_dir}/codex_mcp.json"
+  printf '%s' "$servers_json" | jq '{mcp_servers: .}' >"${out_dir}/codex_mcp.json"
 
   # Wire the generated config into each client's expected location.
   install -d -m 0700 "$HOME/.claude" "$HOME/.codex" 2>/dev/null || true
@@ -325,8 +368,12 @@ cmd_doctor() {
   local rc=0
 
   head2 "Registry"
-  if yq -e '.servers' "$(registry)" >/dev/null 2>&1; then pass "registry parses: $(registry)"
-  else fail "registry is not valid YAML"; return 1; fi
+  if yq -e '.servers' "$(registry)" >/dev/null 2>&1; then
+    pass "registry parses: $(registry)"
+  else
+    fail "registry is not valid YAML"
+    return 1
+  fi
 
   head2 "Policy conformance"
   local n
@@ -341,8 +388,8 @@ cmd_doctor() {
         [ -n "$req" ] || continue
         # `--` is required: $req is a flag like --cap-drop=ALL, which grep
         # would otherwise try to parse as one of its own options.
-        yq -r ".servers.${n}.container_args[]?" "$(registry)" 2>/dev/null | grep -qxF -- "$req" \
-          || missing="${missing} ${req}"
+        yq -r ".servers.${n}.container_args[]?" "$(registry)" 2>/dev/null | list_has "$req" ||
+          missing="${missing} ${req}"
       done < <(yq -r '.requirements.container_hardening.required_args[]?' "$MCP_POLICY_FILE" 2>/dev/null)
       if [ -n "$missing" ]; then
         warned "${n}: hardening flags added at render time:${missing}"
@@ -355,7 +402,8 @@ cmd_doctor() {
       if yq -e ".servers.${n}.scope" "$(registry)" >/dev/null 2>&1; then
         pass "${n}: read-write, scope declared"
       else
-        fail "${n}: read-write with NO scope declared"; rc=1
+        fail "${n}: read-write with NO scope declared"
+        rc=1
       fi
     fi
 
@@ -366,17 +414,23 @@ cmd_doctor() {
       while IFS= read -r denied; do
         [ -n "$denied" ] || continue
         # shellcheck disable=SC2254
-        case "$ev" in $denied) fail "${n}: requests globally denied env var ${ev}"; rc=1 ;; esac
+        case "$ev" in $denied)
+          fail "${n}: requests globally denied env var ${ev}"
+          rc=1
+          ;;
+        esac
       done < <(yq -r '.global_deny.environment_variables[]?' "$MCP_POLICY_FILE" 2>/dev/null)
     done < <(yq -r ".servers.${n}.env_passthrough[]?" "$(registry)" 2>/dev/null)
   done < <(yq -r '.servers | keys | .[]' "$(registry)" 2>/dev/null)
 
   head2 "Trust profile"
-  local prof; prof="$(active_mcp_profile)"
+  local prof
+  prof="$(active_mcp_profile)"
   if [ "$prof" = PRIVILEGED ]; then
     warned "PRIVILEGED active — elevated, time-boxed"
-    local exp; exp="$(state_get mcp-profile-expires '')"
-    [ -n "$exp" ] && info "expires in $(( (exp - $(date +%s)) / 60 )) minutes"
+    local exp
+    exp="$(state_get mcp-profile-expires '')"
+    [ -n "$exp" ] && info "expires in $(((exp - $(date +%s)) / 60)) minutes"
   else pass "${prof}"; fi
 
   head2 "Executables"
@@ -385,11 +439,17 @@ cmd_doctor() {
     [ "$(server_field "$n" enabled false)" = "true" ] || continue
     case "$(server_field "$n" transport stdio)" in
       container)
-        have podman || have docker && pass "${n}: container runtime available" \
-          || { warned "${n}: no container runtime — this server cannot start"; } ;;
+        have podman || have docker && pass "${n}: container runtime available" ||
+          { warned "${n}: no container runtime — this server cannot start"; }
+        ;;
       *)
-        local c; c="$(server_field "$n" command "$n")"
-        have "$c" && pass "${n}: ${c}" || { fail "${n}: ${c} not on PATH"; rc=1; } ;;
+        local c
+        c="$(server_field "$n" command "$n")"
+        have "$c" && pass "${n}: ${c}" || {
+          fail "${n}: ${c} not on PATH"
+          rc=1
+        }
+        ;;
     esac
   done < <(yq -r '.servers | keys | .[]' "$(registry)" 2>/dev/null)
 
@@ -398,8 +458,11 @@ cmd_doctor() {
   for v in ANTHROPIC_API_KEY OPENAI_API_KEY AWS_SECRET_ACCESS_KEY AZURE_CLIENT_SECRET; do
     while IFS= read -r n; do
       [ -n "$n" ] || continue
-      yq -r ".servers.${n}.env_passthrough[]?" "$(registry)" 2>/dev/null | grep -qx "$v" && {
-        fail "${v} is passed to MCP server ${n}"; leaked=1; rc=1; }
+      yq -r ".servers.${n}.env_passthrough[]?" "$(registry)" 2>/dev/null | list_has "$v" && {
+        fail "${v} is passed to MCP server ${n}"
+        leaked=1
+        rc=1
+      }
     done < <(yq -r '.servers | keys | .[]' "$(registry)" 2>/dev/null)
   done
   [ "$leaked" = 0 ] && pass "no model-provider or cloud secret reaches any MCP server"
@@ -414,9 +477,13 @@ cmd_audit() {
   [ "${1:-}" = "--tail" ] && n="${2:-30}"
   head1 "MCP AUDIT LOG"
   local f="${DEVBOX_STATE}/audit.jsonl"
-  [ -r "$f" ] || { info "no audit entries yet"; printf '\n'; return; }
-  grep -E '"event":"mcp' "$f" | tail -n "$n" \
-    | jq -r '"  \(.ts)  \(.event)  \(.details)"' 2>/dev/null || tail -n "$n" "$f" | sed 's/^/  /'
+  [ -r "$f" ] || {
+    info "no audit entries yet"
+    printf '\n'
+    return
+  }
+  grep -E '"event":"mcp' "$f" | tail -n "$n" |
+    jq -r '"  \(.ts)  \(.event)  \(.details)"' 2>/dev/null || tail -n "$n" "$f" | sed 's/^/  /'
   printf '\n  %s%s%s\n\n' "$D" "$f" "$R"
 }
 
@@ -424,19 +491,24 @@ cmd_audit() {
 main() {
   [ -n "$MCP_SERVERS_FILE" ] || abort "mcp/servers.yaml not found — is this a DevBox?"
   enforce_profile_expiry
-  local cmd="${1:-status}"; shift || true
+  local cmd="${1:-status}"
+  shift || true
   case "$cmd" in
-    list)     cmd_list ;;
-    status)   cmd_status ;;
+    list) cmd_list ;;
+    status) cmd_status ;;
     describe) cmd_describe "$@" ;;
-    enable)   cmd_enable "$@" ;;
-    disable)  cmd_disable "$@" ;;
-    profile)  cmd_profile "$@" ;;
-    render)   cmd_render "$@" ;;
-    doctor)   cmd_doctor ;;
-    audit)    cmd_audit "$@" ;;
-    help|--help|-h) usage ;;
-    *) err "unknown command: $cmd"; usage; exit 1 ;;
+    enable) cmd_enable "$@" ;;
+    disable) cmd_disable "$@" ;;
+    profile) cmd_profile "$@" ;;
+    render) cmd_render "$@" ;;
+    doctor) cmd_doctor ;;
+    audit) cmd_audit "$@" ;;
+    help | --help | -h) usage ;;
+    *)
+      err "unknown command: $cmd"
+      usage
+      exit 1
+      ;;
   esac
 }
 

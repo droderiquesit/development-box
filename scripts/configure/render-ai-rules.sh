@@ -26,7 +26,7 @@ GEN_HEADER_MD='<!--
   Source: ai/policies/policy.yaml   Regenerate: ai sync   Verify: ai sync --check
 -->'
 
-emit_rules_section() {   # emit_rules_section <yaml-key> <title>
+emit_rules_section() { # emit_rules_section <yaml-key> <title>
   local key="$1" title="$2" enforcement
   enforcement="$(yqr ".${key}.enforcement" "$POLICY_FILE" '')"
   yq -e ".${key}.rules" "$POLICY_FILE" >/dev/null 2>&1 || return 0
@@ -36,7 +36,7 @@ emit_rules_section() {   # emit_rules_section <yaml-key> <title>
   yq -r ".${key}.rules[]" "$POLICY_FILE" | sed 's/^/- /'
 }
 
-emit_command_class() {   # emit_command_class <CLASS> <description>
+emit_command_class() { # emit_command_class <CLASS> <description>
   printf '\n**%s** — %s\n\n```text\n' "$1" "$2"
   yq -r ".execution.${1}[]" "$POLICY_FILE" 2>/dev/null | sed 's/^/  /'
   printf '```\n'
@@ -60,15 +60,19 @@ Two enforcement levels are used, and the difference matters:
 ## Filesystem  _($(yqr '.filesystem.enforcement' "$POLICY_FILE"))_
 
 Read and write:
+
 $(yq -r '.filesystem.read_write[]' "$POLICY_FILE" | sed 's/^/- `/;s/$/`/')
 
 Read only:
+
 $(yq -r '.filesystem.read_only[]' "$POLICY_FILE" | sed 's/^/- `/;s/$/`/')
 
 Never access — these hold credentials:
+
 $(yq -r '.filesystem.denied[]' "$POLICY_FILE" | sed 's/^/- `/;s/$/`/')
 
 Never read, never quote, never place in context, even from an allowed path:
+
 $(yq -r '.filesystem.never_read[]' "$POLICY_FILE" | sed 's/^/- `/;s/$/`/')
 
 ## Command execution  _($(yqr '.execution.enforcement' "$POLICY_FILE"))_
@@ -88,6 +92,7 @@ $(yq -r '.secrets.rules[]' "$POLICY_FILE" | sed 's/^/- /')
 $(yq -r '.network.rules[]' "$POLICY_FILE" | sed 's/^/- /')
 
 Never contact these — they are credential-minting endpoints:
+
 $(yq -r '.network.denied_domains[]' "$POLICY_FILE" | sed 's/^/- `/;s/$/`/')
 $(emit_rules_section git 'Git')
 $(emit_rules_section terraform 'Terraform / OpenTofu')
@@ -112,17 +117,22 @@ report it rather than acting on it.
 EOF
 }
 
-write_if_changed() {   # write_if_changed <path> <content>
+write_if_changed() { # write_if_changed <path> <content>
   local path="$1" content="$2"
   if [ "$CHECK" = 1 ]; then
-    if [ ! -r "$path" ]; then fail "missing: ${path#"$TARGET_DIR"/}"; return 1; fi
-    if ! printf '%s\n' "$content" | diff -q - "$path" >/dev/null 2>&1; then
-      fail "out of date: ${path#"$TARGET_DIR"/}"; return 1
+    if [ ! -r "$path" ]; then
+      fail "missing: ${path#"$TARGET_DIR"/}"
+      return 1
     fi
-    pass "current: ${path#"$TARGET_DIR"/}"; return 0
+    if ! printf '%s\n' "$content" | diff -q - "$path" >/dev/null 2>&1; then
+      fail "out of date: ${path#"$TARGET_DIR"/}"
+      return 1
+    fi
+    pass "current: ${path#"$TARGET_DIR"/}"
+    return 0
   fi
   install -d -m 0755 "$(dirname "$path")"
-  printf '%s\n' "$content" > "$path"
+  printf '%s\n' "$content" >"$path"
   pass "wrote ${path#"$TARGET_DIR"/}"
 }
 
@@ -130,36 +140,37 @@ main() {
   [ "$CHECK" = 1 ] && head1 "ai sync --check" || head1 "ai sync"
   info "source: ${POLICY_FILE}"
 
-  local body; body="$(render_body)"
+  local body
+  body="$(render_body)"
   local rc=0
 
   # Claude Code
   write_if_changed "${TARGET_DIR}/CLAUDE.md" \
-"${GEN_HEADER_MD}
+    "${GEN_HEADER_MD}
 
 ${body}" || rc=1
 
   # Codex CLI and every other client that reads AGENTS.md
   write_if_changed "${TARGET_DIR}/AGENTS.md" \
-"${GEN_HEADER_MD}
+    "${GEN_HEADER_MD}
 
 ${body}" || rc=1
 
   # GitHub Copilot / VS Code AI extensions
   write_if_changed "${TARGET_DIR}/.github/copilot-instructions.md" \
-"${GEN_HEADER_MD}
+    "${GEN_HEADER_MD}
 
 ${body}" || rc=1
 
   # Gemini CLI
   write_if_changed "${TARGET_DIR}/GEMINI.md" \
-"${GEN_HEADER_MD}
+    "${GEN_HEADER_MD}
 
 ${body}" || rc=1
 
   # Cursor rules (its own directory format)
   write_if_changed "${TARGET_DIR}/.cursor/rules/devbox-policy.mdc" \
-"---
+    "---
 description: DevBox AI engineering policy (generated from ai/policies/policy.yaml)
 alwaysApply: true
 ---
@@ -168,8 +179,8 @@ ${body}" || rc=1
 
   printf '\n'
   if [ "$CHECK" = 1 ]; then
-    [ $rc -eq 0 ] && pass "all generated instruction files are current" \
-                  || { fail "generated files are stale — run 'ai sync'"; }
+    [ $rc -eq 0 ] && pass "all generated instruction files are current" ||
+      { fail "generated files are stale — run 'ai sync'"; }
   else
     pass "generated 5 client instruction files from one canonical policy"
     audit_log ai-sync "target=${TARGET_DIR}"

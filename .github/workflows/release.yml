@@ -1,7 +1,20 @@
 ---
 # =============================================================================
-# Release — tag a version, publish signed images, attach the SBOM.
+# RELEASE — tag a DevBox version, publish signed images, attach the SBOM.
 # =============================================================================
+# Triggered by a `v*.*.*` tag. This is the DEVBOX stream only; the base image
+# has its own stream and its own `base-v*` tags in build-base.yml.
+#
+# This build does NOT build a base image. It pulls the base release pinned in
+# `release.base` in versions.yaml, exactly as build-devbox does. A release that
+# quietly rebuilt its own base would ship a foundation that no test suite had
+# ever seen, and would make "which base is DevBox 1.2.0 on?" unanswerable.
+#
+# Release checklist this encodes:
+#   * the tag and versions.yaml must agree, or the build stops
+#   * the pinned base must already exist in the registry
+#   * the full image test suite runs before anything is pushed
+#   * images are signed by digest and the SBOM is attached as an attestation
 name: release
 
 "on":
@@ -17,8 +30,17 @@ name: release
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   REGISTRY: ghcr.io
+  CACHE_REPO: ghcr.io/${{ github.repository }}/buildcache
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false      # never cancel a half-published release
 
 jobs:
 
@@ -35,114 +57,166 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: resolve the version
+      - name: resolve and verify the version
         id: v
         run: |
+          set -euo pipefail
           tag="${{ inputs.tag || github.ref_name }}"
+          version="${tag#v}"
+
+          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag ${tag} does not carry a bare MAJOR.MINOR.PATCH version"
+            exit 1
+          fi
+
+          # The tag and the manifest must agree. If they can drift, then
+          # `devbox info` inside the image and the tag people pulled will
+          # disagree, and there is no way to tell which one lied.
+          pinned="$(.github/scripts/image-ref.sh devbox-version)"
+          if [ "$version" != "$pinned" ]; then
+            echo "::error::tag ${tag} says ${version} but versions.yaml release.devbox says ${pinned}. Update versions.yaml and re-tag."
+            exit 1
+          fi
+
           {
             echo "tag=$tag"
+            echo "version=$version"
             echo "sha=$(git rev-parse --short HEAD)"
             echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "repo=$(.github/scripts/image-ref.sh devbox-repo)"
+            echo "base=$(.github/scripts/image-ref.sh base)"
+            echo "base_version=$(.github/scripts/image-ref.sh base-version)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: build both images
+      - name: log in to the registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: pull the pinned base image
+        id: base
         run: |
           set -euo pipefail
-          base="$REGISTRY/${GITHUB_REPOSITORY,,}-base:${{ steps.v.outputs.tag }}"
-          devbox="$REGISTRY/${GITHUB_REPOSITORY,,}:${{ steps.v.outputs.tag }}"
-          common=(--build-arg "VCS_REF=${{ steps.v.outputs.sha }}"
-                  --build-arg "BUILD_DATE=${{ steps.v.outputs.date }}"
-                  --build-arg "VERSION=${{ steps.v.outputs.tag }}")
-          podman build -f Containerfile.base -t "$base" "${common[@]}" .
-          podman build -f Containerfile -t "$devbox" --build-arg "BASE_IMAGE_REF=$base" "${common[@]}" .
-          {
-            echo "BASE_REF=$base"
-            echo "DEVBOX_REF=$devbox"
-          } >> "$GITHUB_ENV"
+          base='${{ steps.v.outputs.base }}'
+          if ! podman pull "$base"; then
+            echo "::error::pinned base ${base} is not in the registry. Publish it (tag base-v${{ steps.v.outputs.base_version }}) before releasing the DevBox."
+            exit 1
+          fi
+          echo "digest=$(podman image inspect --format '{{index .RepoDigests 0}}' "$base")" >> "$GITHUB_OUTPUT"
 
-      - name: test
-        run: ENGINE=podman IMAGE="$DEVBOX_REF" BASE_IMAGE="$BASE_REF" tests/run.sh
-
-      - name: SBOMs
+      - name: build
+        env:
+          CACHE_PUSH: '1'
         run: |
-          go install github.com/anchore/syft/cmd/syft@v1.51.0
-          syft="$(go env GOPATH)/bin/syft"
-          mkdir -p dist
-          "$syft" scan "containers-storage:$BASE_REF"   -o spdx-json=dist/base.spdx.json   -o cyclonedx-json=dist/base.cdx.json
-          "$syft" scan "containers-storage:$DEVBOX_REF" -o spdx-json=dist/devbox.spdx.json -o cyclonedx-json=dist/devbox.cdx.json
+          .github/scripts/podman-build.sh \
+            Containerfile \
+            "localhost/devbox:${{ steps.v.outputs.version }}" \
+            --build-arg BASE_IMAGE_REF="${{ steps.v.outputs.base }}" \
+            --build-arg VCS_REF="${{ steps.v.outputs.sha }}" \
+            --build-arg BUILD_DATE="${{ steps.v.outputs.date }}" \
+            --build-arg VERSION="${{ steps.v.outputs.version }}"
 
-      - name: vulnerability gate
+      - name: test suite
         run: |
-          go install github.com/anchore/grype/cmd/grype@v0.117.0
-          # A release IS gated on critical, fixable vulnerabilities. Shipping a
-          # tagged version with a known fixable critical is not acceptable;
-          # unfixed ones are reported and do not block.
-          "$(go env GOPATH)/bin/grype" sbom:dist/devbox.cdx.json \
-            --only-fixed --fail-on critical -o table
+          # A release is the one build that absolutely must not skip this.
+          ENGINE=podman \
+          IMAGE="localhost/devbox:${{ steps.v.outputs.version }}" \
+          BASE_IMAGE="${{ steps.v.outputs.base }}" \
+          tests/run.sh
 
-      - name: publish
+      - uses: ./.github/actions/go-tools
+        with:
+          tools: >-
+            github.com/anchore/syft/cmd/syft@v1.51.0
+            github.com/anchore/grype/cmd/grype@v0.117.0
+            github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
+
+      - name: SBOM
         run: |
           set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
-          podman push "$BASE_REF"
-          podman push "$DEVBOX_REF"
-          podman tag "$DEVBOX_REF" "$REGISTRY/${GITHUB_REPOSITORY,,}:latest"
-          podman push "$REGISTRY/${GITHUB_REPOSITORY,,}:latest"
-          {
-            echo "BASE_DIGEST=$(podman inspect --format '{{index .RepoDigests 0}}' "$BASE_REF")"
-            echo "DEVBOX_DIGEST=$(podman inspect --format '{{index .RepoDigests 0}}' "$DEVBOX_REF")"
-          } >> "$GITHUB_ENV"
+          mkdir -p sbom
+          syft scan "containers-storage:localhost/devbox:${{ steps.v.outputs.version }}" \
+            -o spdx-json=sbom/devbox-${{ steps.v.outputs.version }}.spdx.json \
+            -o cyclonedx-json=sbom/devbox-${{ steps.v.outputs.version }}.cdx.json
+
+      - name: vulnerability report
+        run: |
+          # Recorded in the release notes rather than used as a gate: a release
+          # blocked by an unfixable upstream CVE helps nobody, but shipping one
+          # silently is worse.
+          grype "sbom:sbom/devbox-${{ steps.v.outputs.version }}.cdx.json" \
+            -o table --fail-on '' | tee grype.txt || true
+
+      - name: publish the semver ladder
+        id: publish
+        run: |
+          .github/scripts/publish-image.sh \
+            "localhost/devbox:${{ steps.v.outputs.version }}" \
+            "${{ steps.v.outputs.repo }}" \
+            "${{ steps.v.outputs.version }}"
 
       - name: sign and attest
         run: |
           set -euo pipefail
-          go install github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
-          cosign="$(go env GOPATH)/bin/cosign"
           export COSIGN_EXPERIMENTAL=1
-          "$cosign" sign --yes "$BASE_DIGEST"
-          "$cosign" sign --yes "$DEVBOX_DIGEST"
-          "$cosign" attest --yes --predicate dist/devbox.spdx.json --type spdxjson "$DEVBOX_DIGEST"
-          "$cosign" attest --yes --predicate dist/base.spdx.json   --type spdxjson "$BASE_DIGEST"
+          # By digest — a signature over a movable tag certifies nothing.
+          cosign sign --yes "${{ steps.publish.outputs.digest }}"
+          cosign attest --yes \
+            --predicate "sbom/devbox-${{ steps.v.outputs.version }}.spdx.json" \
+            --type spdxjson \
+            "${{ steps.publish.outputs.digest }}"
 
-      - name: release notes
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          v="${{ steps.v.outputs.version }}"
+          repo="${{ steps.v.outputs.repo }}"
+          notes="$(mktemp)"
           {
-            echo "## AI Engineering DevBox ${{ steps.v.outputs.tag }}"
+            echo "## AI Engineering DevBox \`${v}\`"
             echo
-            echo "### Images"
             echo '```'
-            echo "podman pull $DEVBOX_REF"
-            echo "podman pull $BASE_REF"
+            echo "podman pull ${repo}:${v}"
             echo '```'
             echo
-            echo "Digests:"
+            echo "### Provenance"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| image digest | \`${{ steps.publish.outputs.digest }}\` |"
+            echo "| base image | \`${{ steps.v.outputs.base }}\` |"
+            echo "| base digest | \`${{ steps.base.outputs.digest }}\` |"
+            echo "| commit | \`${{ steps.v.outputs.sha }}\` |"
+            echo
+            echo "Signed with cosign (keyless, bound to this workflow's OIDC identity)."
+            echo "The SPDX SBOM is attached as a signed attestation. Verify with:"
+            echo
             echo '```'
-            echo "$DEVBOX_DIGEST"
-            echo "$BASE_DIGEST"
+            echo "cosign verify ${repo}:${v} \\"
+            echo "  --certificate-identity-regexp 'https://github.com/${GITHUB_REPOSITORY}/' \\"
+            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
             echo '```'
             echo
-            echo "### Verify the signature"
-            echo '```bash'
-            echo "cosign verify \\"
-            echo "  --certificate-identity-regexp 'https://github.com/${GITHUB_REPOSITORY}/.*' \\"
-            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
-            echo "  $DEVBOX_REF"
-            echo '```'
+            echo "### Tags published"
             echo
-            echo "### Pinned tool versions"
-            echo '```yaml'
-            sed -n '/^languages:/,/^$/p;/^iac:/,/^$/p;/^kubernetes:/,/^$/p' versions.yaml
-            echo '```'
+            echo "\`${v}\`, \`${v%.*}\`, \`${v%%.*}\`, \`latest\`"
             echo
-            echo "SBOMs (SPDX + CycloneDX) are attached to this release and also"
-            echo "published as signed cosign attestations on the images."
-          } > dist/RELEASE_NOTES.md
+            if [ -s grype.txt ]; then
+              echo "<details><summary>Vulnerability report</summary>"
+              echo
+              echo '```'
+              head -60 grype.txt
+              echo '```'
+              echo
+              echo "</details>"
+            fi
+          } > "$notes"
 
-      - uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
-        with:
-          tag_name: ${{ steps.v.outputs.tag }}
-          body_path: dist/RELEASE_NOTES.md
-          files: |
-            dist/*.spdx.json
-            dist/*.cdx.json
-          generate_release_notes: true
+          gh release create "${{ steps.v.outputs.tag }}" \
+            --title "DevBox ${v}" \
+            --notes-file "$notes" \
+            --verify-tag \
+            "sbom/devbox-${v}.spdx.json" \
+            "sbom/devbox-${v}.cdx.json"

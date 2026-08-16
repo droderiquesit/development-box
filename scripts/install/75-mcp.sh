@@ -40,6 +40,10 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../lib/versions.sh"
 
 export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-/opt/devbox/npm-global}"
+# See 55-python-tools.sh: 30 s is not enough behind a proxy, and all three
+# retries then fail on the same timeout rather than on anything real.
+export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-180}"
+export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-4}"
 export UV_TOOL_DIR="${UV_TOOL_DIR:-/opt/devbox/uv-tools}"
 export UV_TOOL_BIN_DIR="${UV_TOOL_BIN_DIR:-/opt/devbox/uv-tools/bin}"
 
@@ -50,10 +54,10 @@ npm_global() {
 }
 
 section "MCP servers (Node)"
-npm_global "@modelcontextprotocol/server-filesystem"           "${V_mcp_filesystem}"
-npm_global "@modelcontextprotocol/server-memory"               "${V_mcp_memory}"
-npm_global "@modelcontextprotocol/server-sequential-thinking"  "${V_mcp_sequential_thinking}"
-npm_global "@upstash/context7-mcp"                             "${V_mcp_context7}"
+npm_global "@modelcontextprotocol/server-filesystem" "${V_mcp_filesystem}"
+npm_global "@modelcontextprotocol/server-memory" "${V_mcp_memory}"
+npm_global "@modelcontextprotocol/server-sequential-thinking" "${V_mcp_sequential_thinking}"
+npm_global "@upstash/context7-mcp" "${V_mcp_context7}"
 
 if [ "${FEATURE_MCP_BROWSER:-0}" = "1" ]; then
   npm_global "@playwright/mcp" "${V_mcp_playwright}"

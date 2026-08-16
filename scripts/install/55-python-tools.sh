@@ -26,12 +26,20 @@ set -euo pipefail
 # shellcheck source=../lib/versions.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../lib/versions.sh"
 
+# uv defaults to a 30 s HTTP timeout, which is fine on a fast direct link and
+# marginal behind a corporate TLS-inspecting proxy — exactly the environment
+# this image is built for. A large wheel (litellm, checkov's transitive tree)
+# then fails mid-download and burns all three retries on the same timeout.
+# Raise it; the retry loop stays as the backstop for genuine failures.
+export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-180}"
+export UV_CONCURRENT_DOWNLOADS="${UV_CONCURRENT_DOWNLOADS:-4}"
 export UV_TOOL_DIR="${UV_TOOL_DIR:-/opt/devbox/uv-tools}"
 export UV_TOOL_BIN_DIR="${UV_TOOL_BIN_DIR:-/opt/devbox/uv-tools/bin}"
 mkdir -p "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR"
 
 uv_tool() {
-  local spec="$1"; shift
+  local spec="$1"
+  shift
   log "uv tool install ${spec}"
   # PyPI times out often enough that an un-retried install is a coin flip on a
   # long build. Three attempts with backoff turns that into a non-event.

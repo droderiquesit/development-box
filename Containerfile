@@ -25,7 +25,10 @@
 #   all — they live in ~/.config/devbox and are edited with `mcp` / `ai`.
 # =============================================================================
 
-ARG BASE_IMAGE_REF=ai-devbox-base:latest
+# The DevBox builds FROM a PUBLISHED base image release, pulled from the
+# registry — it does not rebuild the base. Keep this default in step with
+# `release.base` in versions.yaml; CI passes the resolved ref explicitly.
+ARG BASE_IMAGE_REF=ghcr.io/droderiquesit/development-box-base:1.0.0
 
 # -----------------------------------------------------------------------------
 # STAGE 1 — builder. Compiles every Go tool. Discarded afterwards, so the ~1.2 GB

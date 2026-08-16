@@ -232,12 +232,14 @@ They are not mounted by default — deliberately. Options, best first:
 
 1. Use `gh auth login` and HTTPS. No key in the container at all.
 2. Forward your agent:
+
    ```yaml
    volumes:
      - ${SSH_AUTH_SOCK}:/ssh-agent:ro
    environment:
      SSH_AUTH_SOCK: /ssh-agent
    ```
+
 3. Read-only mount `~/.ssh` (uncomment in `compose.yaml`, keep `:ro`).
 
 ---

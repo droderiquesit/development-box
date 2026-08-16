@@ -17,14 +17,19 @@
 set -euo pipefail
 
 devbox_versions_file() {
-  if [ -n "${1:-}" ]; then printf '%s\n' "$1"; return; fi
+  if [ -n "${1:-}" ]; then
+    printf '%s\n' "$1"
+    return
+  fi
   for candidate in \
     "${DEVBOX_VERSIONS_FILE:-}" \
     "./versions.yaml" \
     "/opt/devbox/versions.yaml" \
-    "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)/versions.yaml"
-  do
-    [ -n "$candidate" ] && [ -f "$candidate" ] && { printf '%s\n' "$candidate"; return; }
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)/versions.yaml"; do
+    [ -n "$candidate" ] && [ -f "$candidate" ] && {
+      printf '%s\n' "$candidate"
+      return
+    }
   done
   echo "versions.sh: cannot locate versions.yaml" >&2
   return 1

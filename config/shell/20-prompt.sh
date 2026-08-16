@@ -8,8 +8,8 @@
 
 __devbox_git() {
   local b
-  b="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" || \
-  b="$(git rev-parse --short HEAD 2>/dev/null)" || return 0
+  b="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" ||
+    b="$(git rev-parse --short HEAD 2>/dev/null)" || return 0
   local dirty=''
   git diff --quiet --ignore-submodules HEAD >/dev/null 2>&1 || dirty='*'
   printf ' \001\033[35m\002(%s%s)\001\033[0m\002' "$b" "$dirty"

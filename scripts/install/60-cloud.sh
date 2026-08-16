@@ -19,7 +19,8 @@ set -euo pipefail
 require_root
 
 ARCH_ALT="$(devbox_arch_alt)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")"
 INSTALLED_ANY=0
 
@@ -28,20 +29,21 @@ if [ "${FEATURE_CLOUD_AWS:-0}" = "1" ]; then
   section "AWS CLI v2"
   # AWS publishes a detached PGP signature for the installer zip. Verify it —
   # this is the one vendor that makes real signature verification easy.
-  fetch "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH_ALT}.zip"     "${TMP}/awscliv2.zip"
+  fetch "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH_ALT}.zip" "${TMP}/awscliv2.zip"
   fetch "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH_ALT}.zip.sig" "${TMP}/awscliv2.sig"
   cp "$(dirname "${BASH_SOURCE[0]}")/../../security/allowlists/aws-cli-public-key.asc" "${TMP}/aws.key"
-  export GNUPGHOME="${TMP}/gnupg"; install -d -m 0700 "$GNUPGHOME"
+  export GNUPGHOME="${TMP}/gnupg"
+  install -d -m 0700 "$GNUPGHOME"
   gpg --batch --quiet --import "${TMP}/aws.key"
   # Bind trust to the fingerprint AWS publishes, not merely to whatever key
   # happens to sit in the repo — otherwise the allowlist file is the weak link.
   AWS_FPR_EXPECTED="FB5DB77FD5C118B80511ADA8A6310ACC4672475C"
-  AWS_FPR_ACTUAL="$(gpg --batch --with-colons --fingerprint aws-cli@amazon.com \
-                    | awk -F: '/^fpr:/{print $10; exit}')"
-  [ "$AWS_FPR_ACTUAL" = "$AWS_FPR_EXPECTED" ] \
-    || die "AWS CLI signing key fingerprint mismatch: got ${AWS_FPR_ACTUAL}"
-  gpg --batch --verify "${TMP}/awscliv2.sig" "${TMP}/awscliv2.zip" \
-    || die "AWS CLI signature verification FAILED"
+  AWS_FPR_ACTUAL="$(gpg --batch --with-colons --fingerprint aws-cli@amazon.com |
+    awk -F: '/^fpr:/{print $10; exit}')"
+  [ "$AWS_FPR_ACTUAL" = "$AWS_FPR_EXPECTED" ] ||
+    die "AWS CLI signing key fingerprint mismatch: got ${AWS_FPR_ACTUAL}"
+  gpg --batch --verify "${TMP}/awscliv2.sig" "${TMP}/awscliv2.zip" ||
+    die "AWS CLI signature verification FAILED"
   ok "AWS CLI signature verified"
   unzip -q "${TMP}/awscliv2.zip" -d "$TMP"
   "${TMP}/aws/install" --update >/dev/null

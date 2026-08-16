@@ -19,13 +19,16 @@ Two enforcement levels are used, and the difference matters:
 ## Filesystem  _(HARD)_
 
 Read and write:
+
 - `/workspace`
 - `/tmp`
 
 Read only:
+
 - `/opt/devbox`
 
 Never access — these hold credentials:
+
 - `~/.ssh`
 - `~/.aws`
 - `~/.azure`
@@ -39,6 +42,7 @@ Never access — these hold credentials:
 - `/var/run`
 
 Never read, never quote, never place in context, even from an allowed path:
+
 - `*.pem`
 - `*.key`
 - `*.p12`
@@ -241,6 +245,7 @@ Anything not listed defaults to **APPROVAL_REQUIRED**.
 - Never fetch and execute a remote script (curl | bash) for any reason.
 
 Never contact these — they are credential-minting endpoints:
+
 - `169.254.169.254`
 - `metadata.google.internal`
 

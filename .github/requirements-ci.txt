@@ -1,0 +1,4 @@
+# Python tooling used by CI only. Pinned exactly so that a lint rule cannot
+# change under a pull request that did not touch it, and so setup-python's pip
+# cache has a stable key to hash.
+yamllint==1.38.0

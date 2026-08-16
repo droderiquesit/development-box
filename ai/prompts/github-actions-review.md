@@ -18,9 +18,9 @@ Security first — these are the ones that cause real incidents:
 
 Then correctness and hygiene:
 
-7. Run `actionlint`, `yamllint` and `shellcheck` and report what they find.
-8. Runner images pinned where reproducibility matters; timeouts on every job;
+1. Run `actionlint`, `yamllint` and `shellcheck` and report what they find.
+2. Runner images pinned where reproducibility matters; timeouts on every job;
    `concurrency` groups; cache keys that change when inputs change.
-9. Are the checks that gate merging actually the checks that matter?
+3. Are the checks that gate merging actually the checks that matter?
 
 Give file, line, severity, and the exact fix.

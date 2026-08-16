@@ -87,6 +87,7 @@ grep "$USER" /etc/subuid /etc/subgid || \
 podman system migrate
 podman info | grep -A2 rootless
 ```
+
 </details>
 
 <details>
@@ -112,6 +113,7 @@ brew install podman podman-compose
 podman machine init --cpus 4 --memory 8192 --disk-size 100
 podman machine start
 ```
+
 </details>
 
 ---
@@ -225,12 +227,15 @@ config volume.
 Preference order, best first:
 
 1. **OIDC / workload identity / SSO.** Nothing to mount, nothing to leak.
+
    ```bash
    export AWS_PROFILE=dev-sso        # session expires on its own
    ```
+
 2. **Environment injection** for a short-lived token.
 3. **Read-only mounts** — commented out in `compose.yaml`. Uncomment only what
    you need, and keep `:ro`:
+
    ```yaml
    # - ${HOME}/.aws:/home/dev/.aws:ro
    ```
@@ -464,6 +469,7 @@ Common ones; the rest is in
 | [docs/ai.md](docs/ai.md) | Providers, routing, profiles, workflows, agent roles |
 | [docs/mcp.md](docs/mcp.md) | Registry, trust profiles, scoping, threat model |
 | [docs/security.md](docs/security.md) | Guardrails, secrets, hardening, supply chain, limitations |
+| [docs/releases.md](docs/releases.md) | Version streams, base patching, the tag ladder, build caching |
 | [docs/decisions.md](docs/decisions.md) | Every tool, classified with a reason |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Podman, VS Code, Terraform, AI, MCP |
 

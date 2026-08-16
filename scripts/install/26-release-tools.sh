@@ -34,7 +34,8 @@ mkdir -p "$GOBIN"
 EFFECTIVE_GOBIN="$(go env GOBIN)"
 [ "$EFFECTIVE_GOBIN" = "$GOBIN" ] || die "go env GOBIN is '${EFFECTIVE_GOBIN}', expected '${GOBIN}'"
 ARCH="$(devbox_arch)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
 # checksum_for <checksums-file> <asset-name>
 # Reads a `<sha256>  <filename>` list and returns the digest for one asset.

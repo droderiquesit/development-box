@@ -94,7 +94,7 @@ if id -u ubuntu >/dev/null 2>&1 && [ "$(id -u ubuntu)" = "1000" ] && [ "$DEV_UID
 fi
 
 getent group "$DEV_GID" >/dev/null 2>&1 || groupadd --gid "$DEV_GID" "$DEV_USER"
-id -u "$DEV_USER" >/dev/null 2>&1 || \
+id -u "$DEV_USER" >/dev/null 2>&1 ||
   useradd --uid "$DEV_UID" --gid "$DEV_GID" --create-home --shell /bin/bash "$DEV_USER"
 
 # Passwordless sudo is a deliberate, documented tradeoff: this is a rootless
@@ -102,7 +102,7 @@ id -u "$DEV_USER" >/dev/null 2>&1 || \
 # need apt/package access; a container without sudo just gets rebuilt constantly.
 # Set FEATURE_SUDO=0 to drop it entirely (see docs/security.md).
 if [ "${FEATURE_SUDO:-1}" = "1" ]; then
-  printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$DEV_USER" > "/etc/sudoers.d/90-${DEV_USER}"
+  printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$DEV_USER" >"/etc/sudoers.d/90-${DEV_USER}"
   chmod 0440 "/etc/sudoers.d/90-${DEV_USER}"
 else
   rm -f "/etc/sudoers.d/90-${DEV_USER}"

@@ -18,30 +18,44 @@ DEVBOX_LOG_PREFIX="${DEVBOX_LOG_PREFIX:-devbox}"
 
 # ------------------------------- logging -------------------------------------
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
-  C_RESET=$'\033[0m'; C_DIM=$'\033[2m'; C_RED=$'\033[31m'
-  C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_BLUE=$'\033[34m'; C_BOLD=$'\033[1m'
+  C_RESET=$'\033[0m'
+  C_DIM=$'\033[2m'
+  C_RED=$'\033[31m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_BLUE=$'\033[34m'
+  C_BOLD=$'\033[1m'
 else
-  C_RESET=''; C_DIM=''; C_RED=''; C_GREEN=''; C_YELLOW=''; C_BLUE=''; C_BOLD=''
+  C_RESET=''
+  C_DIM=''
+  C_RED=''
+  C_GREEN=''
+  C_YELLOW=''
+  C_BLUE=''
+  C_BOLD=''
 fi
 export C_RESET C_DIM C_RED C_GREEN C_YELLOW C_BLUE C_BOLD
 
-log()   { printf '%s[%s]%s %s\n' "$C_BLUE" "$DEVBOX_LOG_PREFIX" "$C_RESET" "$*" >&2; }
-ok()    { printf '%s[%s]%s %s✓%s %s\n' "$C_BLUE" "$DEVBOX_LOG_PREFIX" "$C_RESET" "$C_GREEN" "$C_RESET" "$*" >&2; }
-warn()  { printf '%s[%s]%s %swarn%s %s\n' "$C_BLUE" "$DEVBOX_LOG_PREFIX" "$C_RESET" "$C_YELLOW" "$C_RESET" "$*" >&2; }
-die()   { printf '%s[%s]%s %serror%s %s\n' "$C_BLUE" "$DEVBOX_LOG_PREFIX" "$C_RESET" "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
+log() { printf '%s[%s]%s %s\n' "$C_BLUE" "$DEVBOX_LOG_PREFIX" "$C_RESET" "$*" >&2; }
+ok() { printf '%s[%s]%s %s✓%s %s\n' "$C_BLUE" "$DEVBOX_LOG_PREFIX" "$C_RESET" "$C_GREEN" "$C_RESET" "$*" >&2; }
+warn() { printf '%s[%s]%s %swarn%s %s\n' "$C_BLUE" "$DEVBOX_LOG_PREFIX" "$C_RESET" "$C_YELLOW" "$C_RESET" "$*" >&2; }
+die() {
+  printf '%s[%s]%s %serror%s %s\n' "$C_BLUE" "$DEVBOX_LOG_PREFIX" "$C_RESET" "$C_RED" "$C_RESET" "$*" >&2
+  exit 1
+}
 
 # ------------------------------- platform ------------------------------------
-devbox_arch() {           # go/OCI style: amd64 | arm64
+devbox_arch() { # go/OCI style: amd64 | arm64
   case "$(uname -m)" in
-    x86_64|amd64)  echo amd64 ;;
-    aarch64|arm64) echo arm64 ;;
+    x86_64 | amd64) echo amd64 ;;
+    aarch64 | arm64) echo arm64 ;;
     *) die "unsupported architecture: $(uname -m)" ;;
   esac
 }
-devbox_arch_alt() {       # release-asset style: x86_64 | aarch64
+devbox_arch_alt() { # release-asset style: x86_64 | aarch64
   case "$(uname -m)" in
-    x86_64|amd64)  echo x86_64 ;;
-    aarch64|arm64) echo aarch64 ;;
+    x86_64 | amd64) echo x86_64 ;;
+    aarch64 | arm64) echo aarch64 ;;
     *) die "unsupported architecture: $(uname -m)" ;;
   esac
 }
@@ -54,13 +68,15 @@ fetch() {
   local url="$1" dest="$2" attempt=1 max=5 delay=2
   while :; do
     if curl --fail --silent --show-error --location \
-            --retry 0 --connect-timeout 20 --max-time 900 \
-            -o "$dest" "$url"; then
+      --retry 0 --connect-timeout 20 --max-time 900 \
+      -o "$dest" "$url"; then
       return 0
     fi
     [ "$attempt" -ge "$max" ] && die "download failed after ${max} attempts: $url"
     warn "download attempt ${attempt}/${max} failed, retrying in ${delay}s: $url"
-    sleep "$delay"; delay=$(( delay * 2 )); attempt=$(( attempt + 1 ))
+    sleep "$delay"
+    delay=$((delay * 2))
+    attempt=$((attempt + 1))
   done
 }
 
@@ -88,22 +104,31 @@ fetch_verified() {
 # this. It is deliberately *not* used for checksum verification: a bad checksum
 # is a hard failure, not something to retry into submission.
 retry() {
-  local max="$1"; shift
+  local max="$1"
+  shift
   local attempt=1 delay=3
   while :; do
     if "$@"; then return 0; fi
-    [ "$attempt" -ge "$max" ] && { warn "failed after ${max} attempts: $*"; return 1; }
+    [ "$attempt" -ge "$max" ] && {
+      warn "failed after ${max} attempts: $*"
+      return 1
+    }
     warn "attempt ${attempt}/${max} failed, retrying in ${delay}s: $1 $2"
-    sleep "$delay"; delay=$(( delay * 2 )); attempt=$(( attempt + 1 ))
+    sleep "$delay"
+    delay=$((delay * 2))
+    attempt=$((attempt + 1))
   done
 }
 
 # ------------------------------- apt -----------------------------------------
 export DEBIAN_FRONTEND=noninteractive
 
-apt_update()  { apt-get update -qq; }
+apt_update() { apt-get update -qq; }
 apt_install() { apt-get install -y --no-install-recommends "$@"; }
-apt_cleanup() { apt-get clean; rm -rf /var/lib/apt/lists/*; }
+apt_cleanup() {
+  apt-get clean
+  rm -rf /var/lib/apt/lists/*
+}
 
 # apt_add_repo <name> <key-url> <repo-line-with-@KEY@>
 # Adds a third-party apt repository using a dearmored keyring under
@@ -115,14 +140,14 @@ apt_add_repo() {
   tmp="$(mktemp)"
   fetch "$key_url" "$tmp"
   # Accept both armoured and binary keys.
-  if gpg --batch --dearmor < "$tmp" > "${keyring}.tmp" 2>/dev/null; then
+  if gpg --batch --dearmor <"$tmp" >"${keyring}.tmp" 2>/dev/null; then
     mv "${keyring}.tmp" "$keyring"
   else
     mv "$tmp" "$keyring"
   fi
   chmod 0644 "$keyring"
   rm -f "$tmp" "${keyring}.tmp" 2>/dev/null || true
-  printf '%s\n' "${repo_line//@KEY@/$keyring}" > "/etc/apt/sources.list.d/${name}.list"
+  printf '%s\n' "${repo_line//@KEY@/$keyring}" >"/etc/apt/sources.list.d/${name}.list"
   ok "apt repo added: ${name}"
 }
 
@@ -151,5 +176,5 @@ require_root() { [ "$(id -u)" -eq 0 ] || die "must run as root"; }
 
 # section <title> — pretty build-log separator.
 section() {
-  printf '\n%s══ %s %s%s\n' "$C_BOLD" "$*" "$(printf '═%.0s' $(seq 1 $(( 60 - ${#1} > 0 ? 60 - ${#1} : 3 ))))" "$C_RESET" >&2
+  printf '\n%s══ %s %s%s\n' "$C_BOLD" "$*" "$(printf '═%.0s' $(seq 1 $((60 - ${#1} > 0 ? 60 - ${#1} : 3))))" "$C_RESET" >&2
 }

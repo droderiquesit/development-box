@@ -31,21 +31,22 @@ set -euo pipefail
 require_root
 
 ARCH="$(devbox_arch)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
 section "kubectl ${V_kubernetes_kubectl}"
 KURL="https://dl.k8s.io/release/${V_kubernetes_kubectl}/bin/linux/${ARCH}/kubectl"
-fetch "$KURL"          "${TMP}/kubectl"
+fetch "$KURL" "${TMP}/kubectl"
 fetch "${KURL}.sha256" "${TMP}/kubectl.sha256"
-verify_sha256 "${TMP}/kubectl" "$(tr -d ' \n' < "${TMP}/kubectl.sha256")"
+verify_sha256 "${TMP}/kubectl" "$(tr -d ' \n' <"${TMP}/kubectl.sha256")"
 install_bin "${TMP}/kubectl" kubectl
 kubectl version --client=true --output=yaml | head -3
 ok "kubectl installed"
 
 section "Helm ${V_kubernetes_helm}"
 HTAR="helm-${V_kubernetes_helm}-linux-${ARCH}.tar.gz"
-fetch "https://get.helm.sh/${HTAR}"             "${TMP}/${HTAR}"
-fetch "https://get.helm.sh/${HTAR}.sha256sum"   "${TMP}/${HTAR}.sha256sum"
+fetch "https://get.helm.sh/${HTAR}" "${TMP}/${HTAR}"
+fetch "https://get.helm.sh/${HTAR}.sha256sum" "${TMP}/${HTAR}.sha256sum"
 verify_sha256 "${TMP}/${HTAR}" "$(awk '{print $1}' "${TMP}/${HTAR}.sha256sum")"
 tar -C "$TMP" -xzf "${TMP}/${HTAR}"
 install_bin "${TMP}/linux-${ARCH}/helm" helm

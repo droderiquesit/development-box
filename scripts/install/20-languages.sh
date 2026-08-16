@@ -24,7 +24,8 @@ set -euo pipefail
 require_root
 
 ARCH="$(devbox_arch)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
 # ------------------------------------------------------------------ Go --------
 section "Go ${V_languages_go}"
@@ -34,15 +35,15 @@ GO_TARBALL="go${V_languages_go}.linux-${ARCH}.tar.gz"
 # use it as the authority rather than hardcoding a checksum per architecture.
 fetch "https://go.dev/dl/?mode=json&include=all" "${TMP}/go-index.json"
 GO_SHA="$(jq -r --arg v "go${V_languages_go}" --arg f "$GO_TARBALL" \
-      '.[] | select(.version==$v) | .files[] | select(.filename==$f) | .sha256' \
-      "${TMP}/go-index.json" | head -n1)"
+  '.[] | select(.version==$v) | .files[] | select(.filename==$f) | .sha256' \
+  "${TMP}/go-index.json" | head -n1)"
 [ -n "$GO_SHA" ] && [ "$GO_SHA" != "null" ] || die "could not resolve SHA-256 for ${GO_TARBALL}"
 
 fetch_verified "https://go.dev/dl/${GO_TARBALL}" "${TMP}/go.tar.gz" "$GO_SHA"
 rm -rf /usr/local/go
 tar -C /usr/local -xzf "${TMP}/go.tar.gz"
-ln -sf /usr/local/go/bin/go     /usr/local/bin/go
-ln -sf /usr/local/go/bin/gofmt  /usr/local/bin/gofmt
+ln -sf /usr/local/go/bin/go /usr/local/bin/go
+ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 /usr/local/go/bin/go version
 ok "Go installed"
 
@@ -75,7 +76,7 @@ section "uv ${V_languages_uv} (Python package/tool manager)"
 python3 -m venv /opt/devbox/uv-venv
 /opt/devbox/uv-venv/bin/pip install --quiet --no-cache-dir --upgrade pip
 /opt/devbox/uv-venv/bin/pip install --quiet --no-cache-dir "uv==${V_languages_uv}"
-ln -sf /opt/devbox/uv-venv/bin/uv  /usr/local/bin/uv
+ln -sf /opt/devbox/uv-venv/bin/uv /usr/local/bin/uv
 ln -sf /opt/devbox/uv-venv/bin/uvx /usr/local/bin/uvx
 uv --version
 

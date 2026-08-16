@@ -17,6 +17,28 @@
 # Verified against upstream release metadata on 2026-08-16.
 # =============================================================================
 
+# -----------------------------------------------------------------------------
+# Release versions
+# -----------------------------------------------------------------------------
+# Two INDEPENDENT streams. That independence is the whole point: the base image
+# moves on OS-security time, the DevBox moves on tooling time, and neither
+# should be able to drag the other along.
+#
+#   base    the published BASE image release the DevBox is built FROM. It is a
+#           registry artefact, pulled — never rebuilt as a side effect of a
+#           DevBox build. Bumping this one line IS the base patching mechanism:
+#           a reviewable commit, a revertable commit, and one that re-runs the
+#           full DevBox test suite against the new base before anything ships.
+#
+#   devbox  the version of the DevBox image this repository produces.
+#
+# Cutting a release is a git tag, and the tag prefix picks the stream:
+#   base-v1.0.1   -> publishes the base image at 1.0.1
+#   v1.0.0        -> publishes the DevBox image at 1.0.0
+release:
+  base: "1.0.0"
+  devbox: "1.0.0"
+
 metadata:
   schema: 1
   base_image: docker.io/library/ubuntu
