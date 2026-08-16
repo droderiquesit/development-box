@@ -122,7 +122,14 @@ runs:
         missing=0
         while IFS= read -r spec; do
           [ -n "$spec" ] || continue
-          bin="$(basename "${spec%@*}")"
+          # Go names the binary after the last path element — EXCEPT when the
+          # module path ends in a `/vN` major-version suffix, where the name
+          # comes from the element before it:
+          #   github.com/mikefarah/yq/v4@v4.53.3   -> yq   (not "v4")
+          #   mvdan.cc/sh/v3/cmd/shfmt@v3.12.0     -> shfmt (the /v3 is mid-path)
+          path="${spec%@*}"
+          case "$path" in */v[0-9] | */v[0-9][0-9]) path="${path%/*}" ;; esac
+          bin="$(basename "$path")"
           if [ ! -x "${{ steps.plan.outputs.gobin }}/${bin}" ]; then
             echo "::error::${bin} missing after install/restore (${spec})"
             missing=1
