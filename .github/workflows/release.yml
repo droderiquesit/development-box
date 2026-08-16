@@ -214,9 +214,11 @@ jobs:
             fi
           } > "$notes"
 
+          # --target creates the tag at the released commit when dispatch ran
+          # without one; on a tag push the tag exists and --target is ignored.
           gh release create "${{ steps.v.outputs.tag }}" \
             --title "DevBox ${v}" \
             --notes-file "$notes" \
-            --verify-tag \
+            --target "${GITHUB_SHA}" \
             "sbom/devbox-${v}.spdx.json" \
             "sbom/devbox-${v}.cdx.json"
