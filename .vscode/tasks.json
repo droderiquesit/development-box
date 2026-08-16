@@ -1,0 +1,156 @@
+{
+  "version": "2.0.0",
+  // Tasks mirror the `devbox` CLI exactly. Nothing here does something you
+  // cannot do in a terminal — that is the point. The palette is a convenience,
+  // not a second, divergent implementation.
+  "tasks": [
+    {
+      "label": "devbox: doctor",
+      "type": "shell",
+      "command": "devbox doctor",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "devbox: status",
+      "type": "shell",
+      "command": "devbox status",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "terraform: check (fmt+validate+lint+security+policy+docs)",
+      "type": "shell",
+      "command": "devbox terraform check ${input:tfPath}",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "group": { "kind": "test", "isDefault": true }
+    },
+    {
+      "label": "terraform: fmt",
+      "type": "shell",
+      "command": "devbox terraform fmt",
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "terraform: validate",
+      "type": "shell",
+      "command": "devbox terraform validate ${input:tfPath}",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "terraform: plan (read-only, never applies)",
+      "type": "shell",
+      "command": "cd ${input:tfPath} && terraform plan -input=false -lock=false",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "terraform: docs",
+      "type": "shell",
+      "command": "devbox terraform docs ${input:tfPath}",
+      "problemMatcher": []
+    },
+    {
+      "label": "github: check workflows",
+      "type": "shell",
+      "command": "devbox github check",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "security: scan",
+      "type": "shell",
+      "command": "devbox security scan",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "group": "test"
+    },
+    {
+      "label": "security: SBOM",
+      "type": "shell",
+      "command": "devbox security sbom --output ${workspaceFolder}/sbom",
+      "problemMatcher": []
+    },
+    {
+      "label": "pre-commit: run all",
+      "type": "shell",
+      "command": "pre-commit run --all-files",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "ai: models",
+      "type": "shell",
+      "command": "ai models",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "ai: review terraform",
+      "type": "shell",
+      "command": "ai review terraform",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "ai: run workflow",
+      "type": "shell",
+      "command": "ai run ${input:workflow}",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "ai: sync instruction files",
+      "type": "shell",
+      "command": "ai sync",
+      "problemMatcher": []
+    },
+    {
+      "label": "mcp: status",
+      "type": "shell",
+      "command": "mcp status",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "mcp: doctor",
+      "type": "shell",
+      "command": "mcp doctor",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "kubernetes: k9s",
+      "type": "shell",
+      "command": "k9s",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "tfPath",
+      "type": "promptString",
+      "description": "Terraform path",
+      "default": "."
+    },
+    {
+      "id": "workflow",
+      "type": "pickString",
+      "description": "AI workflow",
+      "options": [
+        "terraform-review",
+        "architecture-review",
+        "security-review",
+        "github-actions-review",
+        "incident-analysis"
+      ],
+      "default": "terraform-review"
+    }
+  ]
+}

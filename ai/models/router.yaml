@@ -1,0 +1,106 @@
+# =============================================================================
+# LiteLLM router configuration
+# =============================================================================
+# Mounted read-only into the `model-router` container. This is what turns
+# "seven providers with seven SDKs" into "one OpenAI-compatible endpoint".
+#
+# Credentials are read from the router container's environment — os.environ/NAME
+# is a LiteLLM indirection, not a literal value. Nothing secret is in this file
+# and nothing secret should ever be added to it.
+#
+# Entries whose credential is unset simply fail at call time; they do not
+# prevent the router from starting, so you can list every provider your org may
+# use and configure them as you go.
+# =============================================================================
+
+model_list:
+
+  # ----------------------------------------------------------- Anthropic ----
+  - model_name: claude
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-fast
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-deep
+    litellm_params:
+      model: anthropic/claude-opus-4-1
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # -------------------------------------------------------------- OpenAI ----
+  - model_name: gpt
+    litellm_params:
+      model: openai/gpt-5
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: codex
+    litellm_params:
+      model: openai/gpt-5-codex
+      api_key: os.environ/OPENAI_API_KEY
+
+  # -------------------------------------------------------------- Google ----
+  - model_name: gemini
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: gemini-fast
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  # ------------------------------------------------------- Azure OpenAI -----
+  # Deployment names are tenant-specific — replace `gpt-4o` with yours.
+  - model_name: azure-gpt
+    litellm_params:
+      model: azure/gpt-4o
+      api_base: os.environ/AZURE_OPENAI_ENDPOINT
+      api_key: os.environ/AZURE_OPENAI_API_KEY
+      api_version: "2024-10-21"
+
+  # --------------------------------------------------------- AWS Bedrock ----
+  # No api_key: Bedrock uses the ambient AWS credential chain, so IAM roles,
+  # SSO and IRSA all work without a secret entering the container.
+  - model_name: bedrock-claude
+    litellm_params:
+      model: bedrock/anthropic.claude-sonnet-4-5-v1:0
+      aws_region_name: os.environ/AWS_REGION
+
+  # ------------------------------------------------------- Google Vertex ----
+  # Uses Application Default Credentials / workload identity.
+  - model_name: vertex-gemini
+    litellm_params:
+      model: vertex_ai/gemini-2.5-pro
+      vertex_project: os.environ/GOOGLE_CLOUD_PROJECT
+      vertex_location: os.environ/GOOGLE_CLOUD_LOCATION
+
+  # -------------------------------------------------------------- local -----
+  # Ollama, either the `local-model` compose service or one on the host.
+  - model_name: local
+    litellm_params:
+      model: ollama/qwen2.5-coder:14b
+      api_base: os.environ/OLLAMA_BASE_URL
+  - model_name: qwen-coder
+    litellm_params:
+      model: ollama/qwen2.5-coder:14b
+      api_base: os.environ/OLLAMA_BASE_URL
+  - model_name: deepseek-coder
+    litellm_params:
+      model: ollama/deepseek-coder-v2:16b
+      api_base: os.environ/OLLAMA_BASE_URL
+
+litellm_settings:
+  drop_params: true          # tolerate provider-specific params across backends
+  num_retries: 2
+  request_timeout: 600
+  # Do NOT enable success/failure callbacks to third-party observability here
+  # without reviewing what they transmit: prompts routinely contain source code.
+  telemetry: false
+
+general_settings:
+  # The router is reachable only on the compose network. If you publish port
+  # 4000 to the host, set a master key and treat it as a credential.
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Never log request or response bodies: prompts contain source code, and
+  # responses contain whatever the model produced from it.
+  store_model_in_db: false

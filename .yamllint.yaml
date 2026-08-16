@@ -1,0 +1,38 @@
+# Repository-local yamllint config. Mirrors config/tools/yamllint.yaml, which is
+# the copy shipped inside the image.
+extends: default
+
+rules:
+  line-length:
+    max: 160
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  document-start: disable
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off']
+    check-keys: false
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+  braces:
+    max-spaces-inside: 1
+  brackets:
+    max-spaces-inside: 1
+  # Aligned values read far better in a version manifest or a model catalogue
+  # than left-packed ones. yamllint's defaults reject the alignment; the
+  # alignment wins, because these files are read by humans constantly.
+  colons:
+    max-spaces-after: -1
+  commas:
+    max-spaces-after: -1
+  key-duplicates: enable
+  trailing-spaces: enable
+  new-line-at-end-of-file: enable
+
+ignore: |
+  .terraform/
+  node_modules/
+  .venv/
+  examples/terraform/generated/

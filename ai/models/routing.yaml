@@ -1,0 +1,148 @@
+# =============================================================================
+# TASK ROUTING
+# =============================================================================
+# Which model handles which kind of work, and who checks it.
+#
+#   ai run <workflow>              run a defined workflow
+#   ai run <workflow> --model X    manual override, always available
+#   ai ask "..." --task terraform  route a one-shot question by task type
+#
+# The rationale for routing at all: model families have genuinely different
+# strengths and, more usefully, different failure modes. A second model reviewing
+# the first catches things a second pass from the *same* model will not, because
+# it does not share the same blind spots.
+#
+# HARD LIMITS (from ai/policies/policy.yaml → limits):
+#   * a workflow is a fixed, declared sequence — no agent decides what runs next
+#   * max 8 steps, max 3 iterations per step, 30 minute wall clock
+#   * no agent may invoke itself, spawn a background job, or extend the chain
+#   * every workflow ends at a human
+# This is a pipeline, not an autonomous loop. That is deliberate.
+# =============================================================================
+
+apiVersion: devbox.ai/v1
+kind: TaskRouting
+metadata:
+  name: devbox-routing
+
+routing:
+
+  terraform:
+    primary: claude
+    reviewer: codex
+    profile: terraform
+    rationale: "Claude for authoring against the registry MCP server; Codex reviews because it fails differently."
+
+  python:
+    primary: codex
+    reviewer: claude
+    profile: balanced
+
+  go:
+    primary: claude
+    reviewer: codex
+    profile: balanced
+
+  typescript:
+    primary: codex
+    reviewer: claude
+    profile: balanced
+
+  bash:
+    primary: claude
+    reviewer: null
+    profile: fast
+    post_checks: [shellcheck]
+
+  kubernetes:
+    primary: claude
+    reviewer: codex
+    profile: balanced
+
+  github-actions:
+    primary: claude
+    reviewer: null
+    profile: balanced
+    post_checks: [actionlint, yamllint, shellcheck]
+
+  architecture:
+    primary: claude
+    reviewer: gemini
+    profile: architecture
+
+  research:
+    primary: gemini
+    reviewer: null
+    profile: balanced
+    rationale: "Largest context window — the right tool for reading a whole repo or spec at once."
+
+  security:
+    primary: claude
+    reviewer: codex
+    profile: code-review
+    post_checks: [trivy, checkov, gitleaks, semgrep]
+
+  documentation:
+    primary: claude
+    reviewer: null
+    profile: balanced
+
+  offline:
+    primary: local
+    reviewer: null
+    profile: local
+
+# -----------------------------------------------------------------------------
+# Workflows. Each is a fixed pipeline of declared steps. `ai run <name>`.
+# Step kinds:
+#   agent  — an AI role from ai/agents/ runs with a specific model
+#   tool   — a deterministic tool runs; its output feeds the next step
+#   human  — execution stops and waits for a person
+# -----------------------------------------------------------------------------
+workflows:
+
+  terraform-review:
+    description: "Author or review Terraform, then have it independently reviewed, scanned, costed, and handed to a human."
+    max_steps: 6
+    steps:
+      - {kind: agent, role: terraform-agent, model: claude,  action: analyse}
+      - {kind: agent, role: code-review-agent, model: codex, action: review, input: previous}
+      - {kind: tool,  run: "devbox terraform check"}
+      - {kind: tool,  run: "devbox security scan --scope terraform"}
+      - {kind: tool,  run: "infracost breakdown --path .", optional: true}
+      - {kind: human, action: approve, message: "Review the findings above. No changes have been applied."}
+
+  architecture-review:
+    description: "Design proposal, adversarially reviewed by a different model family."
+    max_steps: 4
+    steps:
+      - {kind: agent, role: architecture-agent, model: claude, action: propose}
+      - {kind: agent, role: architecture-agent, model: gemini, action: challenge, input: previous}
+      - {kind: agent, role: cost-agent,         model: claude, action: estimate, input: previous}
+      - {kind: human, action: approve}
+
+  security-review:
+    description: "Full local security pass over the working tree, then an AI triage of the findings."
+    max_steps: 4
+    steps:
+      - {kind: tool,  run: "devbox security scan --format json"}
+      - {kind: agent, role: security-agent, model: claude, action: triage, input: previous}
+      - {kind: agent, role: security-agent, model: codex,  action: verify, input: previous}
+      - {kind: human, action: approve}
+
+  github-actions-review:
+    description: "Static validation of workflows, then a review of what static analysis cannot see."
+    max_steps: 3
+    steps:
+      - {kind: tool,  run: "devbox github check"}
+      - {kind: agent, role: github-agent, model: claude, action: review, input: previous}
+      - {kind: human, action: approve}
+
+  incident-analysis:
+    description: "Blameless incident analysis from logs and timeline. Read-only throughout."
+    max_steps: 3
+    profile: code-review
+    steps:
+      - {kind: agent, role: sre-agent, model: claude, action: analyse}
+      - {kind: agent, role: sre-agent, model: codex,  action: challenge, input: previous}
+      - {kind: human, action: approve}

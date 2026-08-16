@@ -1,18 +1,29 @@
-# CODEOWNERS - Automatic Code Review Assignment
-# This file defines who must review changes to specific areas of the codebase
+# CODEOWNERS — automatic review assignment.
+# The security-relevant paths are listed explicitly so a change to the guardrails
+# can never merge without the owner seeing it.
 
-# Global code owners (require review for all changes)
 * @droderiquesit
 
-# Repository configuration and security
-.github/ @droderiquesit
-.gitignore @droderiquesit
-SECURITY.md @droderiquesit
-README.md @droderiquesit
+# --- governance: the highest-value review surface in this repository ---------
+/ai/policies/          @droderiquesit
+/mcp/                  @droderiquesit
+/security/             @droderiquesit
+/bin/                  @droderiquesit
 
-# Source code
-src/ @droderiquesit
+# --- build and supply chain --------------------------------------------------
+/Containerfile         @droderiquesit
+/Containerfile.base    @droderiquesit
+/versions.yaml         @droderiquesit
+/scripts/install/      @droderiquesit
+/.github/workflows/    @droderiquesit
+/renovate.json         @droderiquesit
+/.pre-commit-config.yaml @droderiquesit
 
-# Documentation
-docs/ @droderiquesit
-*.md @droderiquesit
+# --- generated files: change ai/policies/policy.yaml instead -----------------
+/CLAUDE.md             @droderiquesit
+/AGENTS.md             @droderiquesit
+/GEMINI.md             @droderiquesit
+
+# --- documentation -----------------------------------------------------------
+/docs/                 @droderiquesit
+*.md                   @droderiquesit

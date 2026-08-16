@@ -1,0 +1,41 @@
+# =============================================================================
+# gitleaks — known findings in history
+# =============================================================================
+# ⚠️  READ THIS BEFORE ADDING A LINE.
+#
+# An entry here silences the DETECTOR. It does not remove the secret, and it
+# does not reduce the risk by one bit. The only thing that makes a leaked
+# credential safe is REVOKING IT.
+#
+# -----------------------------------------------------------------------------
+# Finding: a GitHub personal access token committed in plaintext in
+#          IMPLEMENTATION-GUIDE.md, commit 35d8f55, 2026-08-16.
+#
+# Status:  the literal was redacted from the working tree, but it REMAINS IN
+#          GIT HISTORY and is readable by anyone who can clone this repository.
+#
+# Required action — not optional, not deferred:
+#   1. Revoke the token at https://github.com/settings/tokens.
+#   2. Audit its activity: Settings → Security log, and the audit log of any
+#      organisation it could reach.
+#   3. Issue a replacement with the narrowest scopes that actually work, and
+#      store it outside the repository.
+#
+# Rewriting history is NOT the remediation. It is disruptive, it does not
+# reach forks, clones, caches or the GitHub API's dangling-object store, and
+# it gives a false sense of closure. Revoke the token instead.
+#
+# These fingerprints are commit-scoped: they suppress exactly these seven
+# occurrences in exactly this commit. Any new leak — including the same token
+# reintroduced in a new commit — produces a different fingerprint and still
+# fails the build. That property is the reason this file lists fingerprints
+# rather than adding a path or a rule to the allowlist.
+# -----------------------------------------------------------------------------
+
+35d8f55eff6b12e8b5e287f053663d5fe9328553:IMPLEMENTATION-GUIDE.md:github-pat:25
+35d8f55eff6b12e8b5e287f053663d5fe9328553:IMPLEMENTATION-GUIDE.md:curl-auth-header:151
+35d8f55eff6b12e8b5e287f053663d5fe9328553:IMPLEMENTATION-GUIDE.md:github-pat:152
+35d8f55eff6b12e8b5e287f053663d5fe9328553:IMPLEMENTATION-GUIDE.md:curl-auth-header:165
+35d8f55eff6b12e8b5e287f053663d5fe9328553:IMPLEMENTATION-GUIDE.md:github-pat:166
+35d8f55eff6b12e8b5e287f053663d5fe9328553:IMPLEMENTATION-GUIDE.md:curl-auth-header:185
+35d8f55eff6b12e8b5e287f053663d5fe9328553:IMPLEMENTATION-GUIDE.md:github-pat:186

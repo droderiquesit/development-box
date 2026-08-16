@@ -1,0 +1,29 @@
+# gitleaks configuration for this repository.
+title = "AI Engineering DevBox"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented, non-secret patterns"
+
+paths = [
+  # A public CA certificate is public by definition; a private key here is
+  # caught by the pre-commit detect-private-key hook instead.
+  '''config/ca-certificates/.*\.(crt|pem)$''',
+  '''security/allowlists/aws-cli-public-key\.asc$''',
+  '''\.gitleaks\.toml$''',
+]
+
+regexes = [
+  # Placeholder / example values used throughout the documentation.
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''sk-abcdefghijklmnopqrstuvwxyz''',
+  '''sk-ant-supersecretvaluehere''',
+  '''<redacted>''',
+  '''\$\{[A-Z_]+\}''',
+  '''os\.environ/[A-Z_]+''',
+  # Redaction and detection patterns are regexes ABOUT secrets, not secrets.
+  '''\(gh\[pousr\]_\)''',
+  '''gh\[pousr\]_\[A-Za-z0-9\]''',
+]

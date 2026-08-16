@@ -1,0 +1,42 @@
+# Default yamllint configuration. A repo-local .yamllint.yaml wins.
+#
+# Tuned for infrastructure YAML, which is long-lined and heavily commented by
+# nature. The rules kept as errors are the ones that cause real breakage;
+# cosmetic rules are warnings so they never block a commit.
+extends: default
+
+rules:
+  line-length:
+    max: 160
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  document-start: disable
+  truthy:
+    # GitHub Actions' `on:` key is parsed as the boolean `true` by YAML 1.1.
+    # This is the single most common false positive in CI YAML.
+    allowed-values: ['true', 'false', 'on', 'off']
+    check-keys: false
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+  braces:
+    max-spaces-inside: 1
+  brackets:
+    max-spaces-inside: 1
+  # Aligned values read far better in a version manifest or a model catalogue
+  # than left-packed ones. yamllint's defaults reject the alignment; the
+  # alignment wins, because these files are read by humans constantly.
+  colons:
+    max-spaces-after: -1
+  commas:
+    max-spaces-after: -1
+  key-duplicates: enable      # a duplicate key silently discards config
+  trailing-spaces: enable
+  new-line-at-end-of-file: enable
+
+ignore: |
+  .terraform/
+  node_modules/
+  .venv/

@@ -1,0 +1,276 @@
+---
+# =============================================================================
+# DEVBOX image — build on the published base, test, publish.
+# =============================================================================
+# This is the image that changes weekly. It builds FROM a PUBLISHED base image
+# release pulled from GHCR — the version pinned in `release.base` in
+# versions.yaml — and never rebuilds the base itself.
+#
+# That is a deliberate constraint, and it buys three things:
+#
+#   * Speed. A tool bump costs minutes, not the 25 minutes a base rebuild adds.
+#   * Reproducibility. Every DevBox built from base 1.0.0 has an identical
+#     foundation, whichever runner, month or branch produced it.
+#   * A patching mechanism. Bumping `release.base` is a one-line, reviewable,
+#     revertable commit, and this workflow's full test suite is the gate that
+#     the new base has to pass before it reaches anyone.
+#
+# The one exception is a pull request that edits the base's own inputs. There
+# the pinned base predates the change under review, so the PR builds a throwaway
+# base locally and SAYS SO in the log. It is never published.
+name: build-devbox
+
+"on":
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.vscode/**'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  schedule:
+    # Weekly: picks up new CVE fixes in the pinned tools and refreshes the
+    # channel-pinned AI CLIs, which ship several releases per week.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: Push to the registry
+        type: boolean
+        default: false
+      features:
+        description: 'Extra build args, e.g. "FEATURE_CLOUD_AWS=1 FEATURE_CLOUD_AZURE=1"'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash            # bash -eo pipefail; the default `bash -e` has no pipefail
+
+env:
+  REGISTRY: ghcr.io
+  CACHE_REPO: ghcr.io/${{ github.repository }}/buildcache
+
+concurrency:
+  group: build-devbox-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build:
+    name: build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          {
+            echo "sha=$(git rev-parse --short HEAD)"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "version=$(.github/scripts/image-ref.sh devbox-version)"
+            echo "repo=$(.github/scripts/image-ref.sh devbox-repo)"
+            echo "base=$(.github/scripts/image-ref.sh base)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: log in to the registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      # -----------------------------------------------------------------------
+      # Resolve the base. Pull the pinned release; do not rebuild it.
+      # -----------------------------------------------------------------------
+      - name: resolve the base image
+        id: base
+        run: |
+          set -euo pipefail
+          pinned='${{ steps.meta.outputs.base }}'
+
+          if podman pull "$pinned"; then
+            # Record the digest, not just the tag. A tag tells you what was
+            # asked for; the digest tells you what was actually used, which is
+            # the only thing worth putting in an image label.
+            digest="$(podman image inspect --format '{{index .RepoDigests 0}}' "$pinned")"
+            {
+              echo "ref=$pinned"
+              echo "digest=$digest"
+              echo "local=false"
+            } >> "$GITHUB_OUTPUT"
+            echo "::notice::building on published base ${pinned} (${digest})"
+            exit 0
+          fi
+
+          # A pull request may legitimately be the change that CREATES the base
+          # release it needs. Build a throwaway one so the PR can still be
+          # reviewed — and make it obvious in the log that this is not the
+          # artefact anyone will ship.
+          if [ "${GITHUB_EVENT_NAME}" = pull_request ]; then
+            echo "::warning::${pinned} is not published yet — building a THROWAWAY base for this PR only. It will not be pushed."
+            .github/scripts/podman-build.sh Containerfile.base localhost/base:pr \
+              --build-arg VCS_REF="${{ steps.meta.outputs.sha }}"
+            {
+              echo "ref=localhost/base:pr"
+              echo "digest=(throwaway PR build)"
+              echo "local=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # On main or a tag, a missing base is a real error. Silently building
+          # one locally would produce a DevBox whose foundation nobody reviewed,
+          # tested or signed, and it would look identical to a correct build.
+          cat >&2 <<EOF
+          ::error::base image ${pinned} is not available in the registry.
+
+          versions.yaml pins release.base to $(.github/scripts/image-ref.sh base-version).
+          Publish that base first — tag \`base-v$(.github/scripts/image-ref.sh base-version)\` —
+          or correct the pin. This build will not invent a base of its own.
+          EOF
+          exit 1
+
+      - name: build
+        env:
+          CACHE_PUSH: ${{ (github.event_name != 'pull_request' && github.ref == 'refs/heads/main') && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2206  # deliberate word splitting of the input
+          extra=(${{ inputs.features }})
+          args=()
+          for kv in "${extra[@]-}"; do [ -n "$kv" ] && args+=(--build-arg "$kv"); done
+          .github/scripts/podman-build.sh \
+            Containerfile \
+            "localhost/devbox:${{ steps.meta.outputs.sha }}" \
+            --build-arg BASE_IMAGE_REF="${{ steps.base.outputs.ref }}" \
+            --build-arg VCS_REF="${{ steps.meta.outputs.sha }}" \
+            --build-arg BUILD_DATE="${{ steps.meta.outputs.date }}" \
+            --build-arg VERSION="${{ steps.meta.outputs.version }}" \
+            "${args[@]}"
+
+      - name: test suite
+        run: |
+          ENGINE=podman \
+          IMAGE="localhost/devbox:${{ steps.meta.outputs.sha }}" \
+          BASE_IMAGE="${{ steps.base.outputs.ref }}" \
+          tests/run.sh
+
+      - name: image size report
+        run: |
+          podman images --format '{{.Repository}}:{{.Tag}}  {{.Size}}' \
+            | grep -E 'devbox|base' || true
+
+      - uses: ./.github/actions/go-tools
+        with:
+          tools: >-
+            github.com/anchore/syft/cmd/syft@v1.51.0
+            github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
+
+      - name: SBOM
+        run: |
+          set -euo pipefail
+          mkdir -p sbom
+          syft scan \
+            "containers-storage:localhost/devbox:${{ steps.meta.outputs.sha }}" \
+            -o spdx-json=sbom/devbox.spdx.json \
+            -o cyclonedx-json=sbom/devbox.cdx.json
+          echo "packages: $(jq '.packages | length' sbom/devbox.spdx.json)"
+
+      - uses: ./.github/actions/trivy
+
+      - name: vulnerability scan (SARIF)
+        run: |
+          # The image is in podman's local store, not a registry, so point Trivy
+          # at the containers-storage transport rather than a pullable name.
+          trivy image \
+            --image-src containerd,podman \
+            "localhost/devbox:${{ steps.meta.outputs.sha }}" \
+            --format sarif --output trivy-image.sarif \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
+
+      - uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
+        # Only upload if a scan actually produced a file; `always()` on its own
+        # turns one failure into two and buries the real error.
+        if: always() && hashFiles('trivy-image.sarif') != ''
+        # Code scanning may not be enabled — it is a paid feature on private
+        # repositories. Trivy still ran and the SARIF is still produced; there
+        # is simply nowhere to put it. Failing the whole security job over a
+        # missing *destination* would train people to ignore this job, so the
+        # upload is best-effort and the SARIF is always kept as an artifact.
+        continue-on-error: true
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+      - name: keep the SARIF regardless
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && hashFiles('trivy-image.sarif') != ''
+        with:
+          name: trivy-image-sarif
+          path: trivy-image.sarif
+          retention-days: 30
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: devbox-sbom
+          path: sbom/
+          retention-days: 90
+
+      # --- publish -----------------------------------------------------------
+      # Untagged builds publish :edge and :sha only. The semver ladder belongs
+      # to release.yml, driven by a `v*` tag. A build that was never explicitly
+      # released must never claim a version number.
+      - name: push
+        id: push
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.push_image) && steps.base.outputs.local == 'false'
+        run: |
+          set -euo pipefail
+          dest="${{ steps.meta.outputs.repo }}"
+          for tag in "${{ steps.meta.outputs.sha }}" edge; do
+            podman tag "localhost/devbox:${{ steps.meta.outputs.sha }}" "$dest:$tag"
+            podman push "$dest:$tag"
+          done
+          echo "digest=$(podman inspect --format '{{index .RepoDigests 0}}' "$dest:${{ steps.meta.outputs.sha }}")" >> "$GITHUB_OUTPUT"
+
+      - name: sign and attest the SBOM
+        if: steps.push.outcome == 'success'
+        run: |
+          set -euo pipefail
+          export COSIGN_EXPERIMENTAL=1
+          # Sign the image, then attach the SBOM as a signed attestation. The
+          # attestation is what makes the SBOM trustworthy rather than merely
+          # present.
+          cosign sign --yes "${{ steps.push.outputs.digest }}"
+          cosign attest --yes \
+            --predicate sbom/devbox.spdx.json \
+            --type spdxjson \
+            "${{ steps.push.outputs.digest }}"
+
+      - name: summary
+        if: always()
+        run: |
+          {
+            echo "### DevBox build"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| base image | \`${{ steps.base.outputs.ref }}\` |"
+            echo "| base digest | \`${{ steps.base.outputs.digest }}\` |"
+            echo "| base rebuilt locally | ${{ steps.base.outputs.local }} |"
+            echo "| devbox version | ${{ steps.meta.outputs.version }} |"
+            echo "| commit | \`${{ steps.meta.outputs.sha }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,155 @@
+{
+  // ==========================================================================
+  // Workspace settings for the AI Engineering DevBox
+  // ==========================================================================
+
+  // --- Podman, not Docker --------------------------------------------------
+  // These are the two settings that make VS Code Dev Containers work with
+  // Podman. Without them the extension shells out to `docker` and fails.
+  "dev.containers.dockerPath": "podman",
+  "dev.containers.dockerComposePath": "podman-compose",
+  "dev.containers.defaultExtensions": [],
+  "containers.containerClient": "com.microsoft.visualstudio.containers.podman",
+  "containers.composeClient": "com.microsoft.visualstudio.orchestrator.podmancompose",
+
+  // --- editor --------------------------------------------------------------
+  "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "file",
+  "editor.rulers": [100],
+  "editor.renderWhitespace": "boundary",
+  "editor.bracketPairColorization.enabled": true,
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.eol": "\n",
+  "files.exclude": {
+    "**/.terraform": true,
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true
+  },
+  "search.exclude": {
+    "**/.terraform": true,
+    "**/node_modules": true,
+    "**/.venv": true,
+    "**/sbom": true
+  },
+
+  // --- Terraform / OpenTofu ------------------------------------------------
+  "[terraform]": {
+    "editor.defaultFormatter": "hashicorp.terraform",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[terraform-vars]": {
+    "editor.defaultFormatter": "hashicorp.terraform",
+    "editor.formatOnSave": true
+  },
+  "terraform.languageServer.enable": true,
+  "terraform.languageServer.path": "/opt/devbox/bin/terraform-ls",
+  "terraform.validation.enableEnhancedValidation": true,
+  "terraform.codelens.referenceCount": true,
+
+  // --- Python --------------------------------------------------------------
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports.ruff": "explicit",
+      "source.fixAll.ruff": "explicit"
+    }
+  },
+  "python.defaultInterpreterPath": "/usr/bin/python3",
+  "python.testing.pytestEnabled": true,
+  "python.analysis.typeCheckingMode": "basic",
+
+  // --- Go ------------------------------------------------------------------
+  "[go]": {
+    "editor.defaultFormatter": "golang.go",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": { "source.organizeImports": "explicit" }
+  },
+  "go.toolsManagement.autoUpdate": false,
+  "go.lintOnSave": "package",
+  "go.testOnSave": false,
+
+  // --- TypeScript / JavaScript ---------------------------------------------
+  "[typescript]":      { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[typescriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[javascript]":      { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[json]":            { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[jsonc]":           { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+
+  // --- YAML ----------------------------------------------------------------
+  "[yaml]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml",
+    "editor.tabSize": 2,
+    "editor.autoIndent": "keep"
+  },
+  "yaml.format.enable": true,
+  "yaml.validate": true,
+  "yaml.schemas": {
+    "https://json.schemastore.org/github-workflow.json": ".github/workflows/*.{yml,yaml}",
+    "https://json.schemastore.org/github-action.json": "action.{yml,yaml}",
+    "https://json.schemastore.org/pre-commit-config.json": ".pre-commit-config.yaml",
+    "https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json": "compose.yaml",
+    "kubernetes": ["k8s/**/*.yaml", "manifests/**/*.yaml"]
+  },
+  "yaml.customTags": ["!reference sequence"],
+
+  // --- Shell ---------------------------------------------------------------
+  "[shellscript]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format",
+    "editor.tabSize": 2
+  },
+  "shellcheck.enable": true,
+  "shellcheck.executablePath": "/usr/bin/shellcheck",
+  "shellcheck.customArgs": ["-x"],
+  "shellformat.flag": "-i 2 -ci",
+
+  // --- Markdown ------------------------------------------------------------
+  "[markdown]": {
+    "editor.defaultFormatter": "yzhang.markdown-all-in-one",
+    "editor.wordWrap": "on",
+    "editor.quickSuggestions": { "comments": "off", "strings": "off", "other": "off" }
+  },
+  "markdownlint.config": { "MD013": false, "MD033": false, "MD041": false },
+
+  // --- Git -----------------------------------------------------------------
+  "git.autofetch": true,
+  "git.confirmSync": true,
+  "git.enableSmartCommit": false,
+  // Deliberately NOT enabled: git.allowForcePush. Force-push is BLOCKED policy.
+  "git.allowForcePush": false,
+  "git.pruneOnFetch": true,
+  "gitlens.currentLine.enabled": false,
+
+  // --- Kubernetes ----------------------------------------------------------
+  "vs-kubernetes": {
+    "vs-kubernetes.kubectl-path": "/usr/local/bin/kubectl",
+    "vs-kubernetes.helm-path": "/usr/local/bin/helm",
+    "vs-kubernetes.crd-code-completion": "enabled"
+  },
+
+  // --- Files ---------------------------------------------------------------
+  "files.associations": {
+    "*.tf": "terraform",
+    "*.tfvars": "terraform-vars",
+    "*.hcl": "terraform",
+    "Containerfile*": "dockerfile",
+    "*.rego": "rego",
+    ".tflint.hcl": "terraform",
+    "compose.yaml": "yaml"
+  },
+
+  // --- Terminal ------------------------------------------------------------
+  "terminal.integrated.defaultProfile.linux": "bash",
+  "terminal.integrated.scrollback": 20000,
+
+  // --- Telemetry -----------------------------------------------------------
+  // An engineering workstation handling infrastructure code should not be
+  // sending usage data anywhere by default.
+  "telemetry.telemetryLevel": "off",
+  "redhat.telemetry.enabled": false
+}

@@ -1,0 +1,58 @@
+---
+# =============================================================================
+# Install Trivy from Aqua's signed apt repository.
+# =============================================================================
+# This replaces aquasecurity/trivy-action. That action's installer resolves the
+# release tag through the GitHub API, which is rate-limited per runner IP and
+# fails with a bare "exit code 1" that mentions neither GitHub nor rate limits.
+# It failed on consecutive runs here, with and without an authenticated token.
+#
+# Installing from the signed apt repo instead:
+#   * is the same acquisition path the DevBox image itself uses, so CI and the
+#     image cannot scan with different Trivy versions and disagree
+#   * takes the version from versions.yaml, the single source of truth
+#   * is one fewer third-party action in the supply chain, and no API call that
+#     a busy runner pool can rate-limit
+name: install trivy
+description: Install the Trivy version pinned in versions.yaml, from Aqua's signed apt repository.
+
+outputs:
+  version:
+    description: The Trivy version that was installed.
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: install
+      id: install
+      shell: bash
+      run: |
+        set -euo pipefail
+        pinned="$(awk '/^security:/{s=1;next} s&&/^  trivy:/{gsub(/.*: *"?|".*/,"");print;exit} s&&/^[a-z]/{exit}' versions.yaml)"
+        echo "versions.yaml pins trivy ${pinned:-<unset>}"
+
+        # Signed repo, key pinned to a keyring — never `apt-key add`, never a
+        # repo trusted for every other package on the system.
+        curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key \
+          | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+        codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+        echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb ${codename} main" \
+          | sudo tee /etc/apt/sources.list.d/trivy.list > /dev/null
+        sudo apt-get update -qq
+
+        # Pin to the manifest's major.minor when that build is available, so CI
+        # and the image scan with the same rules. Fall back to the repo's
+        # current version rather than failing a security scan outright — but say
+        # so, because a silent version drift is how two scanners quietly stop
+        # agreeing about what "clean" means.
+        if [ -n "$pinned" ] && apt-cache madison trivy | grep -q " ${pinned}\."; then
+          candidate="$(apt-cache madison trivy | awk -v v="$pinned" '$3 ~ "^"v"\\." {print $3; exit}')"
+          sudo apt-get install -y --no-install-recommends "trivy=${candidate}"
+        else
+          echo "::warning::trivy ${pinned} not in the apt repo; installing the current version instead"
+          sudo apt-get install -y --no-install-recommends trivy
+        fi
+
+        echo "version=$(trivy --version | head -1)" >> "$GITHUB_OUTPUT"
+        trivy --version | head -1

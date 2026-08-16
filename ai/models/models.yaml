@@ -1,0 +1,146 @@
+# =============================================================================
+# PROVIDERS AND MODEL ALIASES
+# =============================================================================
+# Model *names* are NOT hardcoded here. Providers ship new model ids constantly
+# and a hardcoded list is wrong within weeks. What this file defines is:
+#
+#   1. which providers exist and how to reach them,
+#   2. which environment variable carries each provider's credential,
+#   3. stable *aliases* that route to whatever the current good model is.
+#
+# `ai models` calls each configured provider's model-discovery endpoint and
+# prints what the provider actually offers right now. The aliases below are the
+# only names this repo's config depends on, so a provider renaming a model does
+# not ripple into every profile and workflow.
+#
+# Credentials are read from the environment at runtime. Nothing here is a secret
+# and nothing here is baked into the image.
+# =============================================================================
+
+apiVersion: devbox.ai/v1
+kind: ModelCatalog
+metadata:
+  name: devbox-models
+
+providers:
+
+  anthropic:
+    enabled: true
+    kind: native                  # a first-party CLI exists: claude
+    cli: claude
+    credential_env: ANTHROPIC_API_KEY
+    # Discovery: GET /v1/models
+    discovery:
+      url: https://api.anthropic.com/v1/models
+      headers:
+        x-api-key: "${ANTHROPIC_API_KEY}"
+        anthropic-version: "2023-06-01"
+      json_path: ".data[].id"
+    aliases:
+      claude:       claude-sonnet-4-5      # sensible default
+      claude-fast:  claude-haiku-4-5
+      claude-deep:  claude-opus-4-1
+
+  openai:
+    enabled: true
+    kind: native
+    cli: codex
+    credential_env: OPENAI_API_KEY
+    discovery:
+      url: https://api.openai.com/v1/models
+      headers:
+        Authorization: "Bearer ${OPENAI_API_KEY}"
+      json_path: ".data[].id"
+    aliases:
+      gpt:    gpt-5
+      codex:  gpt-5-codex
+
+  google:
+    enabled: true
+    kind: native
+    cli: gemini
+    credential_env: GEMINI_API_KEY
+    discovery:
+      url: https://generativelanguage.googleapis.com/v1beta/models
+      headers:
+        x-goog-api-key: "${GEMINI_API_KEY}"
+      json_path: ".models[].name"
+    aliases:
+      gemini:      gemini-2.5-pro
+      gemini-fast: gemini-2.5-flash
+
+  # --------------------------------------------------------------------------
+  # Enterprise-hosted endpoints. Same models, different control plane, different
+  # compliance story — which is exactly why they are separate providers rather
+  # than options on the ones above.
+  # --------------------------------------------------------------------------
+  azure_openai:
+    enabled: false
+    kind: gateway                 # reached through the LiteLLM router
+    credential_env: AZURE_OPENAI_API_KEY
+    required_env:
+      - AZURE_OPENAI_ENDPOINT     # https://<resource>.openai.azure.com
+      - AZURE_OPENAI_API_VERSION
+    notes: "Deployment names are tenant-specific; set them in ai/models/router.yaml."
+
+  bedrock:
+    enabled: false
+    kind: gateway
+    # No API key: Bedrock uses the ambient AWS credential chain, which means
+    # IAM roles / SSO / IRSA work without a secret ever entering the DevBox.
+    credential_env: ""
+    required_env:
+      - AWS_REGION
+    notes: "Prefer an assumed role over static keys."
+
+  vertex_ai:
+    enabled: false
+    kind: gateway
+    credential_env: ""            # Application Default Credentials
+    required_env:
+      - GOOGLE_CLOUD_PROJECT
+      - GOOGLE_CLOUD_LOCATION
+    notes: "Prefer workload identity over a service-account key file."
+
+  # --------------------------------------------------------------------------
+  # Local inference. The DevBox is a CLIENT only — the model runtime lives on the
+  # host or in its own container (see compose.yaml, profile `local-ai`). Putting a
+  # 6 GB runtime inside a development container is how you get a 12 GB image that
+  # nobody can rebuild.
+  # --------------------------------------------------------------------------
+  ollama:
+    enabled: true
+    kind: openai_compatible
+    base_url_env: OLLAMA_BASE_URL
+    base_url_default: http://host.containers.internal:11434
+    credential_env: ""            # none needed
+    discovery:
+      url: "${OLLAMA_BASE_URL}/api/tags"
+      json_path: ".models[].name"
+    aliases:
+      local:          qwen2.5-coder:14b
+      qwen-coder:     qwen2.5-coder:14b
+      llama:          llama3.3:70b
+      deepseek-coder: deepseek-coder-v2:16b
+
+  # Any OpenAI-compatible endpoint: vLLM, LM Studio, llama.cpp, a corporate
+  # gateway, an internal proxy. One entry covers the whole class.
+  openai_compatible:
+    enabled: false
+    kind: openai_compatible
+    base_url_env: OPENAI_COMPATIBLE_BASE_URL
+    credential_env: OPENAI_COMPATIBLE_API_KEY
+
+# -----------------------------------------------------------------------------
+# The router. `ai` talks to native CLIs directly when one exists (so `claude`
+# keeps every feature it has), and falls back to the LiteLLM gateway for
+# providers with no first-party CLI. That is the whole abstraction.
+# -----------------------------------------------------------------------------
+router:
+  enabled: true
+  kind: litellm
+  base_url_env: DEVBOX_ROUTER_URL
+  base_url_default: http://model-router:4000
+  # The router is a separate container. It never sees a filesystem, a repo or an
+  # MCP server: it forwards chat completions and nothing else.
+  health_path: /health/liveliness

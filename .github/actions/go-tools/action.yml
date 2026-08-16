@@ -1,0 +1,139 @@
+---
+# =============================================================================
+# Cached Go tool installation.
+# =============================================================================
+# Before this action existed, every workflow job ran `go install <tool>@<ver>`
+# inline. That compiles the tool from source on every run — syft, grype, cosign
+# and gitleaks are each 30-90 seconds, and the same tool was rebuilt in five
+# different jobs. Nothing was reused between them.
+#
+# This caches the resulting binaries in ~/go/bin, keyed on the exact tool specs
+# AND the Go toolchain that produced them. On a hit nothing compiles at all; on
+# a miss only the tools in the list are built.
+#
+# Why cache the binaries rather than the module cache: `actions/setup-go`'s
+# build cache still re-links every tool. Caching ~/go/bin skips the work
+# entirely, and the key is exact, so a version bump in versions.yaml can never
+# silently reuse a stale binary.
+name: cached go tools
+description: Install pinned Go-based CLI tools, restoring them from cache when the pins have not changed.
+
+inputs:
+  tools:
+    description: |
+      Whitespace- or newline-separated module@version specs, e.g.
+      "github.com/anchore/syft/cmd/syft@v1.51.0 mvdan.cc/sh/v3/cmd/shfmt@v3.12.0".
+      Every entry MUST carry an explicit @version — an unpinned tool would make
+      the cache key lie.
+    required: true
+  go-version:
+    description: Go toolchain to build the tools with.
+    required: false
+    default: '1.25'
+
+outputs:
+  gobin:
+    description: Directory the tools were installed into (already on PATH).
+    value: ${{ steps.plan.outputs.gobin }}
+  cache-hit:
+    description: Whether every requested tool came from the cache.
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: ${{ inputs.go-version }}
+        # The module cache is not the bottleneck and its key churns constantly;
+        # ~/go/bin below is the cache that actually pays for itself.
+        cache: false
+
+    - name: plan
+      id: plan
+      shell: bash
+      # Passed through the environment rather than interpolated into the script.
+      # `${{ inputs.tools }}` inline would let a caller's string terminate the
+      # quoting and run arbitrary shell — the standard Actions injection.
+      env:
+        TOOLS: ${{ inputs.tools }}
+      run: |
+        set -euo pipefail
+        # Normalise: one spec per line, sorted, so that reordering the input
+        # does not invalidate an otherwise identical cache entry.
+        printf '%s' "$TOOLS" | tr ' \t' '\n\n' | sed '/^$/d' | sort -u > "${RUNNER_TEMP}/go-tools.spec"
+
+        # An unpinned spec would produce a cache key that does not describe what
+        # is in the cache — the next run would reuse yesterday's binary while
+        # claiming to be today's. Refuse rather than cache a lie.
+        grep -v '@' "${RUNNER_TEMP}/go-tools.spec" > "${RUNNER_TEMP}/unpinned" || true
+        if [ -s "${RUNNER_TEMP}/unpinned" ]; then
+          echo "::error::every tool must be pinned to an explicit version:"
+          sed 's/^/  /' "${RUNNER_TEMP}/unpinned"
+          exit 1
+        fi
+
+        gobin="$(go env GOPATH)/bin"
+        mkdir -p "$gobin"
+        {
+          echo "gobin=${gobin}"
+          echo "spec=${RUNNER_TEMP}/go-tools.spec"
+          echo "goversion=$(go env GOVERSION)"
+          echo "hash=$(sha256sum "${RUNNER_TEMP}/go-tools.spec" | cut -c1-32)"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "tools requested:"
+        sed 's/^/  /' "${RUNNER_TEMP}/go-tools.spec"
+
+    - name: restore
+      id: restore
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.plan.outputs.gobin }}
+        # The Go version is part of the key: binaries are build artefacts of a
+        # specific toolchain, and silently reusing ones built by another is how
+        # you get a "works in CI, not on my machine" that takes a day to find.
+        key: >-
+          go-tools-${{ runner.os }}-${{ runner.arch }}-${{ steps.plan.outputs.goversion }}-${{ steps.plan.outputs.hash }}
+
+    - name: install (cache miss only)
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        while IFS= read -r spec; do
+          [ -n "$spec" ] || continue
+          echo "::group::go install ${spec}"
+          go install "$spec"
+          echo "::endgroup::"
+        done < "${{ steps.plan.outputs.spec }}"
+
+    - name: put the tools on PATH
+      shell: bash
+      run: echo "${{ steps.plan.outputs.gobin }}" >> "$GITHUB_PATH"
+
+    - name: verify
+      shell: bash
+      run: |
+        set -euo pipefail
+        # A cache hit that restored an empty or partial directory is worse than
+        # a miss: the job would fail later with "command not found" and look
+        # like a code problem. Check the binaries are actually there.
+        missing=0
+        while IFS= read -r spec; do
+          [ -n "$spec" ] || continue
+          # Go names the binary after the last path element — EXCEPT when the
+          # module path ends in a `/vN` major-version suffix, where the name
+          # comes from the element before it:
+          #   github.com/mikefarah/yq/v4@v4.53.3   -> yq   (not "v4")
+          #   mvdan.cc/sh/v3/cmd/shfmt@v3.12.0     -> shfmt (the /v3 is mid-path)
+          path="${spec%@*}"
+          case "$path" in */v[0-9] | */v[0-9][0-9]) path="${path%/*}" ;; esac
+          bin="$(basename "$path")"
+          if [ ! -x "${{ steps.plan.outputs.gobin }}/${bin}" ]; then
+            echo "::error::${bin} missing after install/restore (${spec})"
+            missing=1
+          fi
+        done < "${{ steps.plan.outputs.spec }}"
+        [ "$missing" -eq 0 ] || exit 1
+        echo "all tools present in ${{ steps.plan.outputs.gobin }} (cache-hit=${{ steps.restore.outputs.cache-hit }})"

@@ -1,0 +1,364 @@
+# =============================================================================
+# CANONICAL AI GOVERNANCE POLICY
+# =============================================================================
+# This is the single source of truth for what AI tooling may do inside the
+# DevBox. Client-specific instruction files (CLAUDE.md, AGENTS.md, .github/
+# copilot-instructions.md, .cursor/rules, …) are GENERATED from this file by
+#
+#     devbox ai sync
+#
+# Do not hand-edit the generated files: they carry a "generated, do not edit"
+# header and `devbox ai sync --check` fails CI when they drift.
+#
+# ENFORCEMENT — be honest about what each layer actually buys you:
+#   HARD  the tool cannot do it. Enforced by the OS, the container, the mount
+#         table or a client-native permission system that the model cannot
+#         talk its way past.
+#   SOFT  the model is instructed not to. Effective in practice, defeated by a
+#         determined prompt injection. Never the only control on anything that
+#         costs money or deletes data.
+# Every rule below states which it is.
+# =============================================================================
+
+apiVersion: devbox.ai/v1
+kind: AIPolicy
+metadata:
+  name: devbox-default
+  version: "1.0.0"
+
+# -----------------------------------------------------------------------------
+# Filesystem
+# -----------------------------------------------------------------------------
+filesystem:
+  enforcement: HARD          # container mounts + MCP path scoping
+  read_write:
+    - /workspace
+    - /tmp
+  read_only:
+    - /opt/devbox            # the DevBox's own config and prompt library
+  # Denied outright. Credential material is either not mounted at all, or
+  # mounted read-only and excluded from every MCP server's path scope.
+  denied:
+    - ~/.ssh
+    - ~/.aws
+    - ~/.azure
+    - ~/.config/gcloud
+    - ~/.kube
+    - ~/.docker
+    - ~/.config/gh
+    - ~/.netrc
+    - ~/.git-credentials
+    - /run/secrets
+    - /var/run
+  # Never read, never quote, never place in model context — even from a path
+  # that is otherwise allowed. SOFT for the agent, backed by gitleaks in
+  # pre-commit and by `devbox security scan` in CI.
+  never_read:
+    - "*.pem"
+    - "*.key"
+    - "*.p12"
+    - "*.pfx"
+    - "id_rsa*"
+    - "id_ed25519*"
+    - ".env"
+    - ".env.*"
+    - "*.tfstate"
+    - "*.tfstate.backup"
+    - "terraform.tfvars"
+    - "*.kubeconfig"
+    - "credentials"
+
+# -----------------------------------------------------------------------------
+# Command execution
+# -----------------------------------------------------------------------------
+# Four categories, applied to every shell command an agent proposes:
+#   SAFE              runs without asking
+#   REVIEW_REQUIRED   runs, and the diff/output must be shown before continuing
+#   APPROVAL_REQUIRED a human types the command, or explicitly approves it
+#   BLOCKED           never, under any circumstance, by any agent
+execution:
+  enforcement: HARD          # via each client's permission/allow-deny config
+  default: APPROVAL_REQUIRED # anything not matched below needs a human
+
+  SAFE:
+    - "git status"
+    - "git diff*"
+    - "git log*"
+    - "git show*"
+    - "git branch"
+    - "git fetch*"
+    - "ls*"
+    - "cat*"
+    - "rg*"
+    - "fd*"
+    - "jq*"
+    - "yq*"
+    - "terraform fmt*"
+    - "terraform validate*"
+    - "terraform plan*"          # read-only: no -auto-approve exists for plan
+    - "terraform providers*"
+    - "terraform output*"
+    - "tofu fmt*"
+    - "tofu validate*"
+    - "tofu plan*"
+    - "terragrunt validate*"
+    - "terragrunt plan*"
+    - "tflint*"
+    - "terraform-docs*"
+    - "checkov*"
+    - "trivy*"
+    - "gitleaks*"
+    - "semgrep*"
+    - "conftest*"
+    - "opa*"
+    - "actionlint*"
+    - "yamllint*"
+    - "shellcheck*"
+    - "ruff*"
+    - "black --check*"
+    - "mypy*"
+    - "pytest*"
+    - "go build*"
+    - "go test*"
+    - "go vet*"
+    - "npm run*"
+    - "pnpm*"
+    - "kubectl get*"
+    - "kubectl describe*"
+    - "kubectl logs*"
+    - "kubectl explain*"
+    - "kubectl diff*"
+    - "helm template*"
+    - "helm lint*"
+    - "helm diff*"
+    - "kustomize build*"
+    - "gh pr view*"
+    - "gh pr list*"
+    - "gh issue view*"
+    - "gh issue list*"
+    - "gh run view*"
+    - "gh run list*"
+    - "gh workflow list*"
+    - "infracost breakdown*"
+    - "infracost diff*"
+    - "syft*"
+    - "grype*"
+
+  REVIEW_REQUIRED:
+    - "git add*"
+    - "git commit*"
+    - "git checkout*"
+    - "git switch*"
+    - "git restore*"
+    - "git stash*"
+    - "git merge*"
+    - "git rebase*"
+    - "terraform init*"
+    - "tofu init*"
+    - "terragrunt init*"
+    - "npm install*"
+    - "pnpm add*"
+    - "uv add*"
+    - "pip install*"
+    - "go get*"
+    - "go mod*"
+    - "pre-commit*"
+    - "black*"
+    - "ruff format*"
+    - "gh pr create*"
+    - "gh issue create*"
+    - "gh pr comment*"
+
+  APPROVAL_REQUIRED:
+    - "git push*"
+    - "terraform apply*"
+    - "tofu apply*"
+    - "terragrunt apply*"
+    - "terraform import*"
+    - "terraform state*"
+    - "terraform taint*"
+    - "terraform untaint*"
+    - "kubectl apply*"
+    - "kubectl create*"
+    - "kubectl patch*"
+    - "kubectl scale*"
+    - "kubectl rollout*"
+    - "kubectl cordon*"
+    - "kubectl drain*"
+    - "helm install*"
+    - "helm upgrade*"
+    - "helm rollback*"
+    - "flux reconcile*"
+    - "argocd app sync*"
+    - "gh workflow run*"
+    - "gh release create*"
+    - "gh api*"                  # can do anything the token can do
+    - "aws *"                    # every mutating verb, and `aws` has hundreds
+    - "az *"
+    - "gcloud *"
+    - "docker *"
+    - "podman *"
+    - "sudo *"
+    - "chmod*"
+    - "chown*"
+    - "curl * | *"               # curl-pipe-anything
+    - "wget * | *"
+
+  # Never. Not with approval — these are either irreversible, destroy audit
+  # trails, or exist only to defeat the controls above. If a human genuinely
+  # needs one, they type it themselves in their own terminal.
+  BLOCKED:
+    - "rm -rf /*"
+    - "rm -rf ~*"
+    - "rm -rf /"
+    - "terraform destroy*"
+    - "tofu destroy*"
+    - "terragrunt destroy*"
+    - "terragrunt run-all destroy*"
+    - "terraform apply -auto-approve*"
+    - "tofu apply -auto-approve*"
+    - "kubectl delete*"
+    - "kubectl replace --force*"
+    - "helm uninstall*"
+    - "helm delete*"
+    - "flux uninstall*"
+    - "git push --force*"
+    - "git push -f*"
+    - "git reset --hard*"
+    - "git clean -fdx*"
+    - "git filter-branch*"
+    - "git filter-repo*"
+    - "gh repo delete*"
+    - "gh secret set*"           # would place a secret in the AI's context
+    - "aws * delete*"
+    - "aws * terminate*"
+    - "az * delete*"
+    - "az * purge*"
+    - "gcloud * delete*"
+    - "mkfs*"
+    - "dd if=*"
+    - ":(){:|:&};:"
+    - "history -c*"
+    - "shred*"
+
+# -----------------------------------------------------------------------------
+# Network
+# -----------------------------------------------------------------------------
+network:
+  enforcement: SOFT            # HARD requires an egress proxy; see docs/security.md
+  # Model/provider endpoints are reached by the AI CLIs themselves; the agent
+  # should not be making arbitrary outbound calls on its own behalf.
+  allowed_domains:
+    - api.anthropic.com
+    - api.openai.com
+    - generativelanguage.googleapis.com
+    - "*.openai.azure.com"
+    - "bedrock*.amazonaws.com"
+    - "*.googleapis.com"
+    - registry.terraform.io
+    - registry.opentofu.org
+    - api.github.com
+    - github.com
+    - proxy.golang.org
+    - registry.npmjs.org
+    - pypi.org
+  denied_domains:
+    - "169.254.169.254"          # cloud instance metadata — credential theft
+    - "metadata.google.internal"
+  rules:
+    - "Never exfiltrate file contents to a domain outside allowed_domains."
+    - "Never fetch and execute a remote script (curl | bash) for any reason."
+
+# -----------------------------------------------------------------------------
+# Secrets
+# -----------------------------------------------------------------------------
+secrets:
+  enforcement: HARD            # not mounted; plus SOFT instruction as backstop
+  rules:
+    - "Never read, print, log, echo or commit a credential value."
+    - "Never place a credential in a commit message, PR body, issue or comment."
+    - "Never write a credential into a file that is not already gitignored."
+    - "When a secret is needed, reference it by variable name, never by value."
+    - "If you encounter what looks like a leaked credential, stop and report the file and line — do not quote the value."
+  redact_patterns:
+    - "(?i)(api[_-]?key|secret|token|password|passwd|credential)\\s*[:=]\\s*\\S+"
+    - "gh[pousr]_[A-Za-z0-9]{16,}"
+    - "sk-[A-Za-z0-9_-]{16,}"
+    - "sk-ant-[A-Za-z0-9_-]{16,}"
+    - "AKIA[0-9A-Z]{16}"
+    - "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+
+# -----------------------------------------------------------------------------
+# Domain-specific operating rules
+# -----------------------------------------------------------------------------
+git:
+  enforcement: SOFT
+  rules:
+    - "Never commit directly to main, master or develop — always use a branch."
+    - "Never force-push. Never rewrite published history."
+    - "Never amend a commit that has been pushed."
+    - "Write conventional commits: type(scope): subject."
+    - "Never add a co-author or trailer that misattributes authorship."
+
+terraform:
+  enforcement: SOFT
+  rules:
+    - "Always run `terraform fmt -recursive` before proposing a change."
+    - "Always run `terraform validate` before proposing a change."
+    - "Run `tflint` before opening a Terraform pull request."
+    - "Run security scanning (checkov + trivy config) on changed modules."
+    - >-
+      Never invent a provider argument or resource attribute. If you are not
+      certain it exists, check the provider documentation — use the terraform
+      MCP server or context7 rather than guessing.
+    - "Prefer a reusable module over copy-pasted resources."
+    - "Pin provider versions with a `~>` constraint; never leave them unbounded."
+    - "Never propose changes that would destroy or replace a stateful resource without calling out the destroy explicitly and prominently."
+    - "Generate module documentation with terraform-docs."
+    - "Never read or modify state files; never suggest `terraform state rm` as a fix."
+    - "Prefer least privilege in every IAM policy you write. No wildcard actions on wildcard resources."
+
+kubernetes:
+  enforcement: SOFT
+  rules:
+    - "Never run a mutating command against a cluster whose context you have not confirmed with the user."
+    - "Prefer GitOps: change the manifest in git, do not `kubectl apply` by hand."
+    - "Always set resource requests and limits."
+    - "Never grant cluster-admin in a generated RBAC manifest."
+    - "Treat production contexts as read-only unless a human explicitly says otherwise in the current conversation."
+
+cloud:
+  enforcement: SOFT
+  rules:
+    - "Never create, modify or delete cloud resources outside Terraform/OpenTofu."
+    - "Use the cloud CLIs for read-only inspection only."
+    - "Never disable logging, audit trails or encryption to make something work."
+    - "Never widen a security group, firewall rule or IAM policy without saying so explicitly."
+
+# -----------------------------------------------------------------------------
+# Engineering rules — the ones that make the output good rather than merely safe
+# -----------------------------------------------------------------------------
+engineering:
+  enforcement: SOFT
+  rules:
+    - "Keep the solution as simple as the problem allows. Introduce complexity only when the simpler version has been shown to fail."
+    - "Explain architectural tradeoffs. State what you rejected and why."
+    - "Match the surrounding code: its naming, its idiom, its comment density."
+    - "Do not invent APIs, flags or attributes. Verify against documentation when uncertain, and say so when you could not verify."
+    - "Prefer least privilege everywhere: IAM, RBAC, tokens, file permissions, container capabilities."
+    - "Generate or update documentation alongside the change."
+    - "Write tests for the behaviour you changed."
+    - "Report failures honestly: if a check did not pass, say so and show the output."
+    - "When you are uncertain, say you are uncertain. Do not present a guess as a fact."
+
+# -----------------------------------------------------------------------------
+# Agent execution limits — bounds on autonomy
+# -----------------------------------------------------------------------------
+limits:
+  enforcement: HARD            # enforced by `ai run` in bin/ai
+  max_workflow_steps: 8        # a workflow may not chain more than this
+  max_agent_iterations: 3      # per step
+  require_human_approval_at_end: true
+  forbid_self_invocation: true # an agent may not schedule or re-enter itself
+  forbid_background_execution: true
+  workflow_timeout_seconds: 1800

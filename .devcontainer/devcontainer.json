@@ -1,0 +1,120 @@
+{
+  // ===========================================================================
+  // VS Code Dev Container — AI Engineering DevBox
+  // ===========================================================================
+  // Two supported ways in:
+  //
+  //   1. "Dev Containers: Reopen in Container"  — VS Code builds/starts the
+  //      compose stack from this file. Best for a fresh machine.
+  //   2. "Dev Containers: Attach to Running Container" — you ran
+  //      `podman compose up -d` yourself. Best when the box is long-lived.
+  //
+  // For Podman, set this once in VS Code settings (see .vscode/settings.json):
+  //   "dev.containers.dockerPath": "podman"
+  //   "dev.containers.dockerComposePath": "podman-compose"
+  // ===========================================================================
+  "name": "AI Engineering DevBox",
+
+  "dockerComposeFile": ["../compose.yaml"],
+  "service": "devbox",
+  "workspaceFolder": "/workspace",
+
+  // The image already runs as the non-root `dev` user; do not let the Dev
+  // Containers extension override it back to root.
+  "remoteUser": "dev",
+  "containerUser": "dev",
+  "updateRemoteUserUID": true,
+
+  // Keep the stack up when the window closes. Rebuilding a devbox because you
+  // closed a tab is the fastest way to stop using one.
+  "shutdownAction": "none",
+
+  "overrideCommand": false,
+
+  // Rootless Podman needs keep-id so bind-mounted files are owned by you inside
+  // the container. Without it every file appears as root and git refuses to work.
+  "runArgs": [
+    "--userns=keep-id",
+    "--security-opt=label=disable"
+  ],
+
+  "customizations": {
+    "vscode": {
+      // Extensions are chosen, not accumulated. Each one earns its place; the
+      // rejected ones are documented in docs/decisions.md.
+      "extensions": [
+        // --- AI ---------------------------------------------------------
+        "anthropic.claude-code",
+        "openai.chatgpt",
+
+        // --- Infrastructure as Code -------------------------------------
+        "hashicorp.terraform",
+        "opentofu.vscode-opentofu",
+
+        // --- Kubernetes / GitOps ----------------------------------------
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "redhat.vscode-yaml",
+        "tim-koehler.helm-intellisense",
+
+        // --- Languages ---------------------------------------------------
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "golang.go",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+
+        // --- Shell / config ----------------------------------------------
+        "timonwong.shellcheck",
+        "foxundermoon.shell-format",
+        "tamasfe.even-better-toml",
+        "editorconfig.editorconfig",
+
+        // --- Git / GitHub -------------------------------------------------
+        "github.vscode-pull-request-github",
+        "github.vscode-github-actions",
+        "eamodio.gitlens",
+
+        // --- Containers ----------------------------------------------------
+        "ms-azuretools.vscode-containers",
+
+        // --- Docs -----------------------------------------------------------
+        "yzhang.markdown-all-in-one",
+        "davidanson.vscode-markdownlint",
+        "bierner.markdown-mermaid"
+      ],
+
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          "bash": { "path": "/bin/bash", "args": ["-l"] }
+        },
+        "remote.autoForwardPorts": false
+      }
+    }
+  },
+
+  // Ports are forwarded explicitly rather than automatically: an auto-forwarded
+  // port is a service you did not know you had exposed.
+  "forwardPorts": [],
+  "portsAttributes": {
+    "4000": { "label": "LiteLLM model router", "onAutoForward": "silent" }
+  },
+
+  // Runs once after the container is created. Non-fatal by design — a failing
+  // post-create hook that blocks you from getting a terminal is worse than the
+  // problem it was trying to prevent.
+  "postCreateCommand": "devbox doctor --core-only || true",
+
+  // Runs every time you attach. Cheap, informative, and it is how you notice a
+  // credential went missing before you spend ten minutes debugging it.
+  "postAttachCommand": "devbox status || true",
+
+  "remoteEnv": {
+    "DEVBOX_WORKSPACE": "/workspace",
+    "DEVBOX_IN_VSCODE": "1"
+  },
+
+  "features": {},
+  "mounts": []
+}

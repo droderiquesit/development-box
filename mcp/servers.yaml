@@ -1,0 +1,251 @@
+# =============================================================================
+# MCP SERVER REGISTRY
+# =============================================================================
+# The internal registry of Model Context Protocol servers. Managed with:
+#
+#   mcp list      mcp status     mcp enable <name>    mcp disable <name>
+#   mcp doctor    mcp audit      mcp describe <name>
+#
+# `mcp` renders this file (filtered by the active trust profile and by
+# mcp/policies.yaml) into each AI client's native config format. It is never
+# edited by hand per client.
+#
+# FIELDS
+#   enabled  whether the server is offered to clients at all
+#   trust    high | medium | restricted — see mcp/profiles.yaml for what each
+#            trust level is permitted to do
+#   access   read-only | read-write
+#   scope    what the server can reach; enforced by argv/env, not by prose
+#   transport stdio | container | http
+#
+# DEFAULTS ARE DELIBERATELY CONSERVATIVE. Anything that can reach a cluster,
+# a cloud account or a browser starts disabled. Turning one on is a decision
+# somebody makes on purpose, and `mcp audit` records it.
+# =============================================================================
+
+apiVersion: devbox.mcp/v1
+kind: ServerRegistry
+metadata:
+  name: devbox-mcp
+  default_trust_profile: READ_ONLY
+
+servers:
+
+  # ---------------------------------------------------------------- core ----
+  filesystem:
+    enabled: true
+    trust: high
+    access: read-write
+    transport: stdio
+    official: true
+    package: "@modelcontextprotocol/server-filesystem"
+    command: mcp-server-filesystem
+    # The allowed roots are passed as argv. The server physically cannot see a
+    # path that is not listed here — this is a HARD control, not an instruction.
+    args: ["${DEVBOX_WORKSPACE}"]
+    scope:
+      allowed_paths: ["/workspace"]
+      denied_paths:
+        - "~/.ssh"
+        - "~/.aws"
+        - "~/.azure"
+        - "~/.config/gcloud"
+        - "~/.kube"
+        - "~/.config/gh"
+        - "/run/secrets"
+    rationale: "Official. The single most-used server; path scoping is what makes it safe."
+
+  git:
+    enabled: true
+    trust: high
+    access: read-only
+    transport: stdio
+    official: true
+    package: "mcp-server-git"
+    command: mcp-server-git
+    args: ["--repository", "${DEVBOX_WORKSPACE}"]
+    scope:
+      allowed_paths: ["/workspace"]
+    rationale: "Official. Structured history and blame without granting shell access."
+
+  github:
+    enabled: true
+    trust: high
+    access: read-write
+    transport: container
+    official: true
+    image: "ghcr.io/github/github-mcp-server:latest"
+    # Run as a container so the token is scoped to one short-lived process and
+    # never sits in the DevBox environment where every other tool can read it.
+    container_args:
+      - "--rm"
+      - "--interactive"
+      - "--network=host"
+      - "--security-opt=no-new-privileges"
+      - "--cap-drop=ALL"
+      - "--read-only"
+      - "--env=GITHUB_PERSONAL_ACCESS_TOKEN"
+      - "--env=GITHUB_TOOLSETS"
+    env_passthrough: [GITHUB_PERSONAL_ACCESS_TOKEN, GITHUB_TOOLSETS]
+    scope:
+      # Enforced by the PAT's own scopes — the strongest control available here.
+      # Mint a fine-grained token with exactly these and nothing more.
+      permissions:
+        contents: read
+        pull_requests: write
+        issues: read
+        actions: read
+        metadata: read
+      denied:
+        - "administration"
+        - "secrets"
+        - "workflows:write"
+        - "packages:write"
+    rationale: "Official GitHub server. Containerised specifically to contain the token."
+
+  fetch:
+    enabled: true
+    trust: medium
+    access: read-only
+    transport: stdio
+    official: true
+    package: "mcp-server-fetch"
+    command: mcp-server-fetch
+    scope:
+      # An unrestricted fetch tool plus a prompt injection is an exfiltration
+      # primitive. The allowlist is the whole point of this entry.
+      allowed_domains:
+        - "registry.terraform.io"
+        - "registry.opentofu.org"
+        - "docs.aws.amazon.com"
+        - "learn.microsoft.com"
+        - "cloud.google.com"
+        - "kubernetes.io"
+        - "helm.sh"
+        - "docs.github.com"
+        - "developer.hashicorp.com"
+      denied_domains:
+        - "169.254.169.254"
+        - "metadata.google.internal"
+        - "localhost"
+        - "127.0.0.1"
+    rationale: "Official. Documentation retrieval, domain-allowlisted."
+
+  time:
+    enabled: true
+    trust: high
+    access: read-only
+    transport: stdio
+    official: true
+    package: "mcp-server-time"
+    command: mcp-server-time
+    rationale: "Official, tiny, and removes an entire class of date-arithmetic errors."
+
+  # ------------------------------------------------------------ reasoning ----
+  sequential-thinking:
+    enabled: false
+    trust: high
+    access: read-only
+    transport: stdio
+    official: true
+    package: "@modelcontextprotocol/server-sequential-thinking"
+    command: mcp-server-sequential-thinking
+    rationale: "Official. Structured decomposition for hard problems. Off by default — it consumes real context and only pays for itself on genuinely hard tasks."
+
+  memory:
+    enabled: false
+    trust: medium
+    access: read-write
+    transport: stdio
+    official: true
+    package: "@modelcontextprotocol/server-memory"
+    command: mcp-server-memory
+    env:
+      MEMORY_FILE_PATH: "${HOME}/.local/share/devbox/mcp-memory.json"
+    scope:
+      allowed_paths: ["~/.local/share/devbox"]
+    rationale: "Official. Cross-session notes in a named volume. Off by default: anything written here is read back into future context, so it is a persistence-based injection surface."
+
+  # ------------------------------------------------------------ knowledge ----
+  context7:
+    enabled: true
+    trust: medium
+    access: read-only
+    transport: stdio
+    package: "@upstash/context7-mcp"
+    command: context7-mcp
+    rationale: "Version-accurate library and provider documentation. Directly addresses the 'invented provider attribute' failure mode, which is the single most common way generated Terraform is wrong."
+
+  terraform:
+    enabled: true
+    trust: medium
+    access: read-only
+    transport: container
+    official: true
+    image: "docker.io/hashicorp/terraform-mcp-server:latest"
+    container_args:
+      - "--rm"
+      - "--interactive"
+      - "--network=host"
+      - "--security-opt=no-new-privileges"
+      - "--cap-drop=ALL"
+      - "--read-only"
+    scope:
+      network: ["registry.terraform.io"]
+    rationale: "HashiCorp's official Terraform Registry server. Read-only: it queries the registry, it does not touch state or run terraform."
+
+  # ------------------------------------------------------- infrastructure ----
+  kubernetes:
+    enabled: false
+    trust: restricted
+    access: read-only
+    transport: stdio
+    package: "kubernetes-mcp-server"
+    command: kubernetes-mcp-server
+    env_passthrough: [KUBECONFIG]
+    scope:
+      # If you enable this, point KUBECONFIG at a context bound to a
+      # ServiceAccount with the `view` ClusterRole. Not your admin kubeconfig.
+      required_kubeconfig: "read-only context"
+      denied_verbs: [delete, create, patch, replace, deletecollection]
+      denied_resources: [secrets]
+    rationale: "OFF BY DEFAULT AND trust=restricted. A cluster-admin kubeconfig handed to an LLM is the most dangerous integration available here. Enable only with a scoped, read-only kubeconfig — `mcp enable kubernetes` will refuse without one."
+
+  aws:
+    enabled: false
+    trust: restricted
+    access: read-only
+    transport: stdio
+    package: "awslabs.core-mcp-server"
+    command: awslabs.core-mcp-server
+    env_passthrough: [AWS_PROFILE, AWS_REGION]
+    scope:
+      required_iam: "ReadOnlyAccess or narrower"
+      denied_actions: ["*:Delete*", "*:Terminate*", "iam:*", "sts:AssumeRole"]
+    rationale: "Off by default. Inherits real cloud credentials; only ever pair with a read-only role."
+
+  playwright:
+    enabled: false
+    trust: restricted
+    access: read-only
+    transport: stdio
+    package: "@playwright/mcp"
+    command: mcp-server-playwright
+    args: ["--headless", "--isolated"]
+    rationale: "Off by default. Browser automation is both heavy (pulls a browser runtime) and a direct route for prompt injection from arbitrary web content into the agent."
+
+# -----------------------------------------------------------------------------
+# Explicitly considered and rejected. Recorded so the same debate is not
+# re-litigated every quarter.
+# -----------------------------------------------------------------------------
+rejected:
+  - name: "everything / demo servers"
+    reason: "Test fixtures. No place in an image that also holds cloud credentials."
+  - name: "shell / command-execution servers"
+    reason: "Hands an LLM an unrestricted shell, which defeats every control in ai/policies/policy.yaml. The AI CLIs already have permission-gated shell access."
+  - name: "generic database servers with write access"
+    reason: "Read-only DB access can be justified per project; a write-capable server in a shared devbox image cannot."
+  - name: "community aggregator/'awesome-mcp' bundles"
+    reason: "Unvetted third-party code with a tool surface the model can invoke. Add servers one at a time, on purpose."
+  - name: "observability servers (Datadog/Grafana/etc.)"
+    reason: "Genuinely useful, but org-specific. Add via mcp/servers.local.yaml with a read-only API key rather than shipping a default nobody can use."

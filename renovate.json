@@ -1,0 +1,135 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard"
+  ],
+
+  "//": [
+    "versions.yaml is the ONE place a tool version lives. Renovate opens PRs",
+    "against it using the regex managers below; nothing else in the repository",
+    "should ever be edited to bump a version.",
+    "",
+    "Update strategy, by change rate:",
+    "  * language runtimes and IaC tools  -> weekly, grouped, minor+patch auto",
+    "  * security scanners                -> daily, ungrouped, they matter most",
+    "  * AI CLIs                          -> not managed here; they are channel",
+    "    pinned in versions.yaml on purpose and refreshed by `devbox update ai`",
+    "  * base image digest                -> weekly"
+  ],
+
+  "timezone": "UTC",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 6,
+  "prHourlyLimit": 3,
+  "rebaseWhen": "conflicted",
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "chore(deps):",
+
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Go modules pinned in versions.yaml (comment names the module)",
+      "managerFilePatterns": ["/^versions\\.yaml$/"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>\\S+)\\s*\\n\\s*[a-z_]+:\\s*\"?(?<currentValue>[^\"\\s#]+)\"?"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Base image digest",
+      "managerFilePatterns": ["/^versions\\.yaml$/"],
+      "matchStrings": [
+        "base_image:\\s*(?<depName>\\S+)[\\s\\S]*?base_tag:\\s*\"(?<currentValue>[^\"]+)\"[\\s\\S]*?base_digest:\\s*\"(?<currentDigest>sha256:[a-f0-9]+)\""
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+
+  "packageRules": [
+    {
+      "description": "Security scanners get their own fast lane — a scanner that is a month behind is a scanner that misses the CVE you care about.",
+      "matchFileNames": ["versions.yaml"],
+      "matchPackageNames": [
+        "**/trivy**",
+        "**/gitleaks**",
+        "**/grype**",
+        "**/syft**",
+        "**/checkov**",
+        "**/semgrep**",
+        "**/cosign**"
+      ],
+      "schedule": ["at any time"],
+      "groupName": null,
+      "labels": ["dependencies", "security"],
+      "prPriority": 10
+    },
+    {
+      "description": "IaC toolchain moves together — Terraform, OpenTofu and their linters are used in the same command and are best reviewed as one change.",
+      "matchFileNames": ["versions.yaml"],
+      "matchPackageNames": [
+        "**/terraform**",
+        "**/opentofu**",
+        "**/terragrunt**",
+        "**/tflint**",
+        "**/infracost**"
+      ],
+      "groupName": "IaC toolchain",
+      "labels": ["dependencies", "terraform"]
+    },
+    {
+      "description": "Kubernetes tooling moves together for the same reason.",
+      "matchFileNames": ["versions.yaml"],
+      "matchPackageNames": [
+        "**/kubernetes**",
+        "**/kubectl**",
+        "**/helm**",
+        "**/kustomize**",
+        "**/k9s**",
+        "**/stern**",
+        "**/flux**",
+        "**/kind**"
+      ],
+      "groupName": "Kubernetes toolchain",
+      "labels": ["dependencies", "kubernetes"]
+    },
+    {
+      "description": "Language runtimes are reviewed individually — a Go or Node major bump can change behaviour in ways a grouped PR hides.",
+      "matchFileNames": ["versions.yaml"],
+      "matchPackageNames": ["golang/**", "nodejs/**", "python/**"],
+      "groupName": null,
+      "labels": ["dependencies", "runtime"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Major bumps are never automatic. Somebody reads the changelog.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major"],
+      "minimumReleaseAge": "14 days"
+    },
+    {
+      "description": "GitHub Actions are handled by Dependabot; Renovate stays out of that file to avoid duplicate PRs.",
+      "matchManagers": ["github-actions"],
+      "enabled": false
+    },
+    {
+      "description": "Pre-commit hook revs track the same tools; keep them in step with versions.yaml.",
+      "matchManagers": ["pre-commit"],
+      "groupName": "pre-commit hooks",
+      "labels": ["dependencies", "pre-commit"]
+    }
+  ],
+
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security", "vulnerability"],
+    "schedule": ["at any time"],
+    "prPriority": 20
+  },
+
+  "osvVulnerabilityAlerts": true,
+
+  "pre-commit": { "enabled": true }
+}

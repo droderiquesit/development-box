@@ -1,0 +1,11 @@
+{
+  "name": "devbox-ci-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node CLIs used by CI only. Kept out of the repository root so the DevBox image and this tooling never share a dependency tree. Pinned exactly, and installed with `npm ci` against the committed lockfile, so a lint rule cannot change under a PR that did not touch it.",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "markdownlint-cli": "0.46.0",
+    "strip-json-comments-cli": "3.0.0"
+  }
+}

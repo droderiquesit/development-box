@@ -55,6 +55,15 @@ db/
 # IDE & EDITOR FILES
 # ============================================================================
 .vscode/
+# ...but this repository SHIPS a curated VS Code configuration (§3): it is part
+# of the DevBox, not a personal preference. Only genuinely per-user files stay
+# ignored.
+!.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
 .idea/
 *.swp
 *.swo
@@ -78,7 +87,13 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+# Lockfiles from *user* projects living under /workspace are noise here — this
+# repository is not a Node application. The one exception is .github/tooling,
+# whose lockfile is the whole point: it is what lets CI run `npm ci` and get a
+# byte-identical, pinned linter every time instead of whatever npm resolved
+# that morning.
 package-lock.json
+!.github/tooling/package-lock.json
 yarn.lock
 pnpm-lock.yaml
 lerna-debug.log*
@@ -157,6 +172,9 @@ karma.conf.js.bak
 .docker
 docker-compose.override.yml
 .dockerignore
+# ...except ours, which is a build-context definition kept in lockstep with
+# .containerignore so the image builds identically under podman and docker.
+!.dockerignore
 .kube/
 .kubeconfig
 
@@ -194,3 +212,26 @@ ehthumbs.db
 # .env.production
 # private_data/
 # secret_keys/
+
+# -----------------------------------------------------------------------------
+# AI Engineering DevBox
+# -----------------------------------------------------------------------------
+# Generated SBOMs and scan reports — reproducible, never committed.
+sbom/
+*.spdx.json
+*.cdx.json
+*.sarif
+
+# Terraform example output
+examples/terraform/generated/
+
+# A local MCP registry overlay for org-specific servers (may hold endpoints).
+mcp/servers.local.yaml
+
+# Extra CA certificates are environment-specific and must not be committed.
+config/ca-certificates/*.crt
+config/ca-certificates/*.pem
+!config/ca-certificates/README.md
+
+# The template is committed; a filled-in .env never is.
+!.env.example
