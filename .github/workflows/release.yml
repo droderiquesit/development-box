@@ -100,6 +100,20 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
 
+      - name: reclaim runner disk
+        run: |
+          # The hosted runner's root filesystem has ~14 GB free — not enough for
+          # a 10.5 GB image plus the layer copies containers/storage stages in
+          # /var/tmp while committing (the build died there at the 70-ai layer).
+          # The preinstalled toolchains this job never touches are the biggest
+          # things on the disk; removing them frees ~25-30 GB.
+          before="$(df -h / | awk 'NR==2{print $4}')"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/powershell /usr/share/swift \
+                      /usr/local/share/chromium /opt/microsoft
+          echo "free space: ${before} -> $(df -h / | awk 'NR==2{print $4}')"
+
       - name: pull the pinned base image
         id: base
         run: |
