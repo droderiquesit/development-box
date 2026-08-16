@@ -1,7 +1,8 @@
 # =============================================================================
 # Container image policy (§31)
 # =============================================================================
-# Evaluated by conftest against Containerfile and Containerfile.base in CI.
+# Evaluated by conftest against the Containerfile in CI (the base image's
+# Containerfile lives in — and is policy-checked by — the Base Image Factory).
 # These are the image requirements this repository commits to, expressed as code
 # rather than as a paragraph in a README that nobody re-reads.
 package main

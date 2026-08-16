@@ -8,8 +8,8 @@
 #   IaC · Kubernetes/GitOps · GitHub · security & supply chain · cloud CLIs
 #   AI clients · MCP servers · governance config · the devbox/ai/mcp CLIs
 #
-#   podman build -f Containerfile.base -t ai-devbox-base:latest .
-#   podman build -f Containerfile      -t ai-devbox:latest      .
+#   make build          # pulls the pinned published base, then builds this
+#   podman build -f Containerfile -t ai-devbox:latest .
 #
 # MODULARITY
 #   Every optional module is a build ARG. Nothing below is load-bearing for
@@ -141,7 +141,17 @@ COPY config/  /opt/devbox/config/
 COPY scripts/configure/ /opt/devbox/scripts/configure/
 COPY scripts/health/    /opt/devbox/scripts/health/
 COPY scripts/security/  /opt/devbox/scripts/security/
-RUN chmod +x /opt/devbox/bin/devbox /opt/devbox/bin/ai /opt/devbox/bin/mcp \
+# The DevBox's shell drop-ins, via the base image's documented extension
+# contract: files in /etc/devbox/shell.d/ are sourced after the base's own
+# 00-env.sh, in name order. 05 = DevBox env (Terraform/K8s/AI vars, the
+# devbox CLIs on PATH), 10 = aliases, 20 = prompt. The 05 env file is also
+# symlinked into /etc/profile.d/ — same as the base does with its 00 — so
+# non-interactive login shells (`bash -lc`, CI run-steps) see it too.
+COPY config/shell/05-devbox-env.sh /etc/devbox/shell.d/05-devbox-env.sh
+COPY config/shell/10-aliases.sh    /etc/devbox/shell.d/10-aliases.sh
+COPY config/shell/20-prompt.sh     /etc/devbox/shell.d/20-prompt.sh
+RUN ln -sf /etc/devbox/shell.d/05-devbox-env.sh /etc/profile.d/05-devbox-env.sh && \
+    chmod +x /opt/devbox/bin/devbox /opt/devbox/bin/ai /opt/devbox/bin/mcp \
              /opt/devbox/scripts/configure/*.sh \
              /opt/devbox/scripts/health/*.sh \
              /opt/devbox/scripts/security/*.sh && \

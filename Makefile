@@ -49,9 +49,7 @@ FEATURE_MCP_BROWSER    ?= 0
 FEATURE_MCP_KUBERNETES ?= 0
 FEATURE_ANSIBLE        ?= 0
 
-# The DevBox builds FROM the published, pinned base — it does not rebuild it.
-# `make build-base` exists for developing the base itself, not as a dependency
-# of `make build`.
+# The DevBox builds FROM the published, pinned base — it never builds one.
 BASE_REF   := $(BASE_IMAGE):$(BASE_VERSION)
 DEVBOX_REF := $(DEVBOX_IMAGE):$(TAG)
 
@@ -85,7 +83,7 @@ help: ## Show this help
 # --------------------------------------------------------------------- build --
 # `build` does NOT build the base. The DevBox builds FROM a published base
 # release — same rule as CI — so that what you build locally has the identical
-# foundation to what ships. `make build-base` is for developing the base itself.
+# foundation to what ships. Developing the base happens in the factory repo.
 .PHONY: build
 build: pull-base build-devbox ## Build the DevBox on the pinned, published base
 
@@ -96,14 +94,17 @@ pull-base: ## Pull the pinned base image release from the registry
 	  echo ""; \
 	  echo "could not pull $(BASE_REF)."; \
 	  echo "  * private registry? $(ENGINE) login $(REGISTRY)"; \
-	  echo "  * developing the base itself? make build-base"; \
+	  echo "  * missing release? it is published by the Base Image Factory repo"; \
 	  exit 1; \
 	}
 
 .PHONY: build-base
-build-base: ## Build the base image LOCALLY (for developing the base)
-	@echo "building a LOCAL base — this is not the published $(BASE_REF)"
-	$(ENGINE) build -f Containerfile.base -t $(BASE_REF) $(COMMON_ARGS) .
+build-base: ## (moved) The base image is built by the Base Image Factory repo
+	@echo "The base image is an external dependency owned by the Base Image"
+	@echo "Factory repository (github.com/droderiquesit/ai-devbox)."
+	@echo "Develop it there: images/ai-engineering/ + 'make build IMAGE=ai-engineering'."
+	@echo "This repository only consumes the published release pinned in versions.yaml."
+	@exit 1
 
 .PHONY: build-devbox
 build-devbox: ## Build the DevBox image on $(BASE_REF)
@@ -205,18 +206,17 @@ versions: ## Print the pinned version manifest
 	@scripts/lib/versions.sh | sed 's/^export V_/  /;s/=/ = /'
 
 .PHONY: push
-push: ## Push both images to $(REGISTRY)
+push: ## Push the DevBox image to $(REGISTRY) (the base belongs to the factory)
 	@test -n "$(REGISTRY)" || { echo "REGISTRY is not set"; exit 1; }
-	$(ENGINE) push $(BASE_REF)
 	$(ENGINE) push $(DEVBOX_REF)
 
 .PHONY: clean
 clean: ## Remove built images (volumes are kept)
-	-$(ENGINE) rmi $(DEVBOX_REF) $(BASE_REF)
+	-$(ENGINE) rmi $(DEVBOX_REF)
 
 .PHONY: clean-all
 clean-all: ## Remove images AND volumes — this deletes persisted developer state
 	@read -p "This deletes all DevBox volumes (caches, config, history). Continue? [y/N] " r; \
 	 [ "$$r" = y ] || exit 1
 	-$(ENGINE) compose down -v
-	-$(ENGINE) rmi $(DEVBOX_REF) $(BASE_REF)
+	-$(ENGINE) rmi $(DEVBOX_REF)

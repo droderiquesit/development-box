@@ -27,19 +27,16 @@ tasks:
     silent: true
 
   build:
-    desc: Build both images
-    cmds: [{task: build-base}, {task: build-devbox}]
+    desc: Build the DevBox on the pinned, published base (same rule as CI)
+    cmds: [{task: pull-base}, {task: build-devbox}]
 
-  build-base:
-    desc: Build the base image (OS + language runtimes)
+  pull-base:
+    desc: Pull the pinned Base Image Factory release (the base is never built here)
     cmds:
-      - '{{.ENGINE}} build -f Containerfile.base -t {{.BASE_REF}}
-         --build-arg VCS_REF={{.VCS_REF}} --build-arg BUILD_DATE={{.BUILD_DATE}} .'
-    sources: [Containerfile.base, versions.yaml, 'scripts/install/1*.sh', 'scripts/install/2*.sh', 'config/shell/**', 'scripts/lib/**']
+      - '{{.ENGINE}} pull {{.BASE_REF}}'
 
   build-devbox:
     desc: Build the DevBox image
-    deps: [build-base]
     cmds:
       - '{{.ENGINE}} build -f Containerfile -t {{.DEVBOX_REF}}
          --build-arg BASE_IMAGE_REF={{.BASE_REF}}
