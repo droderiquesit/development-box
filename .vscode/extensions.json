@@ -1,0 +1,43 @@
+{
+  // Deliberately curated. Every extension here is either required to edit a
+  // file type this box is built for, or it removes a real papercut. Extensions
+  // considered and rejected are listed in docs/decisions.md — the short version
+  // is that overlapping linters and "AI assistant #4" cost more in CPU, conflict
+  // and confusion than they return.
+  "recommendations": [
+    "anthropic.claude-code",
+    "openai.chatgpt",
+    "hashicorp.terraform",
+    "opentofu.vscode-opentofu",
+    "ms-kubernetes-tools.vscode-kubernetes-tools",
+    "redhat.vscode-yaml",
+    "tim-koehler.helm-intellisense",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "charliermarsh.ruff",
+    "golang.go",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "timonwong.shellcheck",
+    "foxundermoon.shell-format",
+    "tamasfe.even-better-toml",
+    "editorconfig.editorconfig",
+    "github.vscode-pull-request-github",
+    "github.vscode-github-actions",
+    "eamodio.gitlens",
+    "ms-azuretools.vscode-containers",
+    "ms-vscode-remote.remote-containers",
+    "yzhang.markdown-all-in-one",
+    "davidanson.vscode-markdownlint",
+    "bierner.markdown-mermaid"
+  ],
+  "unwantedRecommendations": [
+    // Superseded by charliermarsh.ruff, which does lint + import sort + format
+    // in one fast binary. Running all three fights over format-on-save.
+    "ms-python.flake8",
+    "ms-python.isort",
+    "ms-python.black-formatter",
+    // Superseded by ms-azuretools.vscode-containers.
+    "ms-azuretools.vscode-docker"
+  ]
+}

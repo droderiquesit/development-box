@@ -1,0 +1,179 @@
+---
+# =============================================================================
+# Build, test and publish the DEVBOX image.
+# =============================================================================
+# This is the image that changes weekly. It builds FROM the base image, so a
+# tool-version bump here costs a few minutes rather than a full toolchain
+# rebuild — which is the entire reason the two images are separate.
+name: build-devbox
+
+"on":
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.vscode/**'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  schedule:
+    # Weekly: picks up new CVE fixes in the pinned tools and refreshes the
+    # channel-pinned AI CLIs, which ship several releases per week.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: Push to the registry
+        type: boolean
+        default: false
+      features:
+        description: 'Extra build args, e.g. "FEATURE_CLOUD_AWS=1 FEATURE_CLOUD_AZURE=1"'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}
+  BASE_IMAGE: ghcr.io/${{ github.repository }}-base:latest
+
+concurrency:
+  group: build-devbox-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build:
+    name: build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: metadata
+        id: meta
+        run: |
+          {
+            echo "sha=$(git rev-parse --short HEAD)"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "version=$(git describe --tags --always --dirty)"
+          } >> "$GITHUB_OUTPUT"
+
+      # On a pull request the published base may not contain the PR's changes to
+      # the base layer, so build it locally. On main we use the published one.
+      - name: resolve the base image
+        id: base
+        run: |
+          set -euo pipefail
+          if podman pull "$BASE_IMAGE" 2>/dev/null; then
+            echo "ref=$BASE_IMAGE" >> "$GITHUB_OUTPUT"
+            echo "built the DevBox on the published base image"
+          else
+            echo "published base unavailable — building it locally"
+            podman build -f Containerfile.base -t localhost/base:ci \
+              --build-arg VCS_REF="${{ steps.meta.outputs.sha }}" .
+            echo "ref=localhost/base:ci" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: build
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2206
+          extra=(${{ inputs.features }})
+          args=()
+          for kv in "${extra[@]-}"; do [ -n "$kv" ] && args+=(--build-arg "$kv"); done
+          podman build \
+            -f Containerfile \
+            -t "localhost/devbox:${{ steps.meta.outputs.sha }}" \
+            --build-arg BASE_IMAGE_REF="${{ steps.base.outputs.ref }}" \
+            --build-arg VCS_REF="${{ steps.meta.outputs.sha }}" \
+            --build-arg BUILD_DATE="${{ steps.meta.outputs.date }}" \
+            --build-arg VERSION="${{ steps.meta.outputs.version }}" \
+            "${args[@]}" \
+            .
+
+      - name: test suite
+        run: |
+          ENGINE=podman \
+          IMAGE="localhost/devbox:${{ steps.meta.outputs.sha }}" \
+          BASE_IMAGE="${{ steps.base.outputs.ref }}" \
+          tests/run.sh
+
+      - name: image size report
+        run: |
+          podman images --format '{{.Repository}}:{{.Tag}}  {{.Size}}' \
+            | grep -E 'devbox|base' || true
+
+      - name: SBOM
+        run: |
+          go install github.com/anchore/syft/cmd/syft@v1.51.0
+          mkdir -p sbom
+          "$(go env GOPATH)/bin/syft" scan \
+            "containers-storage:localhost/devbox:${{ steps.meta.outputs.sha }}" \
+            -o spdx-json=sbom/devbox.spdx.json \
+            -o cyclonedx-json=sbom/devbox.cdx.json
+          echo "packages: $(jq '.packages | length' sbom/devbox.spdx.json)"
+
+      - name: vulnerability scan (SARIF)
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        with:
+          image-ref: localhost/devbox:${{ steps.meta.outputs.sha }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
+        if: always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: devbox-sbom
+          path: sbom/
+          retention-days: 90
+
+      # --- publish -----------------------------------------------------------
+      - name: log in to the registry
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.push_image)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: push
+        id: push
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.push_image)
+        run: |
+          set -euo pipefail
+          dest="$REGISTRY/${IMAGE,,}"
+          for tag in "${{ steps.meta.outputs.sha }}" latest; do
+            podman tag "localhost/devbox:${{ steps.meta.outputs.sha }}" "$dest:$tag"
+            podman push "$dest:$tag"
+          done
+          echo "digest=$(podman inspect --format '{{index .RepoDigests 0}}' "$dest:latest")" >> "$GITHUB_OUTPUT"
+
+      - name: sign and attest the SBOM
+        if: steps.push.outcome == 'success'
+        run: |
+          go install github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
+          cosign="$(go env GOPATH)/bin/cosign"
+          export COSIGN_EXPERIMENTAL=1
+          # Sign the image, then attach the SBOM as a signed attestation. The
+          # attestation is what makes the SBOM trustworthy rather than merely
+          # present.
+          "$cosign" sign --yes "${{ steps.push.outputs.digest }}"
+          "$cosign" attest --yes \
+            --predicate sbom/devbox.spdx.json \
+            --type spdxjson \
+            "${{ steps.push.outputs.digest }}"

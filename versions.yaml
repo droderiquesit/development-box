@@ -1,0 +1,186 @@
+# =============================================================================
+# AI Engineering DevBox — canonical version manifest
+# =============================================================================
+# This is the SINGLE SOURCE OF TRUTH for every pinned tool version.
+#
+#   * `scripts/lib/versions.sh` renders this file into shell variables that the
+#     install scripts consume, so nothing is pinned twice.
+#   * Renovate (see renovate.json) opens PRs against this file only.
+#   * `devbox versions` prints the manifest next to what is actually installed.
+#
+# PINNING POLICY
+#   exact   -> reproducible builds, Renovate-managed  (Go tools, tarballs)
+#   apt     -> tracked by the vendor's signed apt repo, pinned to major.minor
+#   channel -> intentionally floating (npm dist-tags for AI CLIs, which ship
+#              multiple releases per week and are useless when stale)
+#
+# Verified against upstream release metadata on 2026-08-16.
+# =============================================================================
+
+metadata:
+  schema: 1
+  base_image: docker.io/library/ubuntu
+  base_tag: "24.04"
+  # Pin the base image by digest for reproducible builds. Renovate keeps it
+  # aligned with base_tag. Set BASE_DIGEST="" at build time to opt out.
+  base_digest: "sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
+
+# -----------------------------------------------------------------------------
+# Language runtimes (baked into the BASE image — slow moving)
+# -----------------------------------------------------------------------------
+languages:
+  # Go: exact tarball from go.dev, checksum-verified.
+  # renovate: datasource=golang-version depName=go
+  go: "1.26.6"
+  # Node.js: current LTS line via NodeSource signed apt repo.
+  # renovate: datasource=node-version depName=node
+  node_major: "24"
+  # Python: Ubuntu 24.04 LTS ships 3.12 as the system interpreter. We do NOT
+  # replace it; uv manages per-project interpreters when a project needs another.
+  python: "3.12"
+  # uv drives all Python tool installs; pinned exactly.
+  # renovate: datasource=pypi depName=uv
+  uv: "0.12.5"
+
+# -----------------------------------------------------------------------------
+# Infrastructure as Code
+# -----------------------------------------------------------------------------
+iac:
+  # renovate: datasource=github-releases depName=hashicorp/terraform
+  terraform: "1.15.8"        # apt.releases.hashicorp.com (signed)
+  # renovate: datasource=github-releases depName=opentofu/opentofu
+  opentofu: "1.12.5"         # packages.opentofu.org (signed)
+  # renovate: datasource=github-releases depName=gruntwork-io/terragrunt
+  terragrunt: "v1.1.3"       # release artefact, SHA-256 verified
+  # renovate: datasource=go depName=github.com/hashicorp/terraform-ls
+  terraform_ls: "v0.39.0"    # go install
+  # renovate: datasource=go depName=github.com/terraform-docs/terraform-docs
+  terraform_docs: "v0.24.0"  # go install
+  # renovate: datasource=go depName=github.com/terraform-linters/tflint
+  tflint: "v0.64.0"          # go install
+  # renovate: datasource=github-releases depName=infracost/infracost
+  infracost: "v0.10.45"      # release artefact, SHA-256 verified
+  # renovate: datasource=pypi depName=checkov
+  checkov: "3.3.11"          # uv tool (PyPI)
+
+# -----------------------------------------------------------------------------
+# Kubernetes / GitOps
+# -----------------------------------------------------------------------------
+kubernetes:
+  # renovate: datasource=github-releases depName=kubernetes/kubernetes
+  kubectl: "v1.36.3"         # dl.k8s.io tarball, checksum-verified
+  # renovate: datasource=github-releases depName=helm/helm
+  helm: "v4.2.4"             # get.helm.sh tarball, checksum-verified
+  # renovate: datasource=go depName=sigs.k8s.io/kustomize/kustomize/v5
+  kustomize: "v5.8.1"        # go install
+  # renovate: datasource=go depName=github.com/derailed/k9s
+  k9s: "v0.51.0"             # go install
+  # renovate: datasource=go depName=github.com/stern/stern
+  stern: "v1.34.0"           # go install
+  # renovate: datasource=go depName=github.com/ahmetb/kubectx
+  kubectx: "v0.11.0"         # go install (provides kubectx + kubens)
+  # renovate: datasource=github-releases depName=fluxcd/flux2
+  flux: "v2.9.4"             # release artefact, SHA-256 verified
+  # kind/k3d are OPTIONAL: see docs/decisions.md. Enabled with FEATURE_K8S_LOCAL.
+  # renovate: datasource=go depName=sigs.k8s.io/kind
+  kind: "v0.32.0"            # go install
+
+# -----------------------------------------------------------------------------
+# Security / policy / supply chain
+# -----------------------------------------------------------------------------
+security:
+  # renovate: datasource=github-releases depName=aquasecurity/trivy
+  trivy: "0.69"              # aquasecurity apt repo, major.minor
+  # renovate: datasource=go depName=github.com/zricethezav/gitleaks/v8
+  gitleaks: "v8.30.1"        # go install
+  # renovate: datasource=go depName=github.com/open-policy-agent/opa
+  opa: "v1.19.0"             # go install
+  # renovate: datasource=go depName=github.com/open-policy-agent/conftest
+  conftest: "v0.69.0"        # go install
+  # renovate: datasource=go depName=github.com/anchore/syft
+  syft: "v1.51.0"            # go install
+  # renovate: datasource=go depName=github.com/anchore/grype
+  grype: "v0.117.0"          # go install
+  # renovate: datasource=go depName=github.com/sigstore/cosign/v2
+  cosign: "v2.6.5"           # go install
+  # renovate: datasource=pypi depName=semgrep
+  semgrep: "1.145.0"         # uv tool (PyPI)
+
+# -----------------------------------------------------------------------------
+# Developer tooling
+# -----------------------------------------------------------------------------
+tools:
+  # renovate: datasource=go depName=github.com/mikefarah/yq/v4
+  yq: "v4.53.3"              # go install
+  # renovate: datasource=go depName=github.com/go-task/task/v3
+  task: "v3.52.0"            # go install
+  # renovate: datasource=go depName=github.com/rhysd/actionlint
+  actionlint: "v1.7.12"      # go install
+  # renovate: datasource=go depName=github.com/junegunn/fzf
+  fzf: "v0.74.2"             # go install
+  # renovate: datasource=go depName=github.com/jesseduffield/lazygit
+  lazygit: "v0.64.1"         # go install
+  # just is a Rust crate; installed from the Ubuntu archive (universe) to avoid
+  # dragging a Rust toolchain into the image. See docs/decisions.md.
+  # renovate: datasource=pypi depName=yamllint
+  yamllint: "1.38.0"         # uv tool (PyPI)
+  # renovate: datasource=pypi depName=pre-commit
+  pre_commit: "4.6.2"        # uv tool (PyPI)
+  # renovate: datasource=pypi depName=ruff
+  ruff: "0.16.3"             # uv tool (PyPI)
+  # renovate: datasource=pypi depName=black
+  black: "26.5.1"            # uv tool (PyPI)
+  # renovate: datasource=pypi depName=mypy
+  mypy: "2.3.1"              # uv tool (PyPI)
+  # renovate: datasource=pypi depName=pytest
+  pytest: "9.1.1"            # uv tool (PyPI)
+  # renovate: datasource=pypi depName=ansible-lint
+  ansible_lint: "26.8.0"     # uv tool (PyPI), OPTIONAL feature
+
+# -----------------------------------------------------------------------------
+# Cloud CLIs (OPTIONAL modules — FEATURE_CLOUD_{AZURE,AWS,GCP})
+# -----------------------------------------------------------------------------
+cloud:
+  awscli: "2"                # awscli.amazonaws.com installer, GPG-verified
+  azurecli: "apt"            # packages.microsoft.com (signed), tracks stable
+  gcloud: "apt"              # packages.cloud.google.com (signed), tracks stable
+
+# -----------------------------------------------------------------------------
+# AI clients
+# -----------------------------------------------------------------------------
+# Channel-pinned on purpose: these ship several releases per week and an exact
+# pin here goes stale within days. `devbox update ai` re-resolves the channel and
+# `devbox versions` always reports the resolved version. Pin exactly by replacing
+# "latest" with a version string if your change-control process requires it.
+ai:
+  claude_code: "latest"      # npm @anthropic-ai/claude-code
+  codex: "latest"            # npm @openai/codex
+  gemini_cli: "latest"       # npm @google/gemini-cli
+  # renovate: datasource=pypi depName=litellm
+  litellm: "1.97.0"          # uv tool (PyPI) — model router, exact pin
+  # renovate: datasource=pypi depName=llm
+  llm: "0.32"                # uv tool (PyPI) — scriptable one-shot prompts
+  # OPTIONAL, off by default (FEATURE_AI_EXTRA):
+  # renovate: datasource=pypi depName=aider-chat
+  aider: "0.86.2"            # uv tool (PyPI)
+  opencode: "latest"         # npm opencode-ai
+
+# -----------------------------------------------------------------------------
+# MCP servers (installed only when enabled in mcp/servers.yaml)
+# -----------------------------------------------------------------------------
+mcp:
+  filesystem: "latest"       # npm @modelcontextprotocol/server-filesystem
+  memory: "latest"           # npm @modelcontextprotocol/server-memory
+  sequential_thinking: "latest"  # npm @modelcontextprotocol/server-sequential-thinking
+  # renovate: datasource=pypi depName=mcp-server-git
+  git: "2026.7.10"           # uv tool (PyPI) mcp-server-git
+  # renovate: datasource=pypi depName=mcp-server-fetch
+  fetch: "2026.7.10"         # uv tool (PyPI) mcp-server-fetch
+  # renovate: datasource=pypi depName=mcp-server-time
+  time: "2026.7.10"          # uv tool (PyPI) mcp-server-time
+  context7: "latest"         # npm @upstash/context7-mcp — library docs
+  playwright: "latest"       # npm @playwright/mcp — browser research (OPTIONAL)
+  kubernetes: "latest"       # npm kubernetes-mcp-server (OPTIONAL)
+  # github + terraform MCP servers run as OCI containers, not in-image binaries:
+  github_image: "ghcr.io/github/github-mcp-server:latest"
+  terraform_image: "docker.io/hashicorp/terraform-mcp-server:latest"

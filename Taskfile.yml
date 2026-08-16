@@ -1,0 +1,101 @@
+# =============================================================================
+# Taskfile — the same operations as the Makefile, for people who prefer `task`.
+# =============================================================================
+# Both exist because both are genuinely used in this space: Make is universal,
+# Task is nicer for cross-platform work and has better `--list` output. They
+# delegate to the same scripts, so they cannot drift in behaviour.
+version: '3'
+
+vars:
+  ENGINE: '{{.ENGINE | default "podman"}}'
+  TAG: '{{.TAG | default "latest"}}'
+  BASE_REF: '{{.BASE_IMAGE | default "ai-devbox-base"}}:{{.TAG | default "latest"}}'
+  DEVBOX_REF: '{{.DEVBOX_IMAGE | default "ai-devbox"}}:{{.TAG | default "latest"}}'
+  VCS_REF:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo unknown
+  BUILD_DATE:
+    sh: date -u +%Y-%m-%dT%H:%M:%SZ
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds: [task --list]
+    silent: true
+
+  build:
+    desc: Build both images
+    cmds: [{task: build-base}, {task: build-devbox}]
+
+  build-base:
+    desc: Build the base image (OS + language runtimes)
+    cmds:
+      - '{{.ENGINE}} build -f Containerfile.base -t {{.BASE_REF}}
+         --build-arg VCS_REF={{.VCS_REF}} --build-arg BUILD_DATE={{.BUILD_DATE}} .'
+    sources: [Containerfile.base, versions.yaml, 'scripts/install/1*.sh', 'scripts/install/2*.sh', 'config/shell/**', 'scripts/lib/**']
+
+  build-devbox:
+    desc: Build the DevBox image
+    deps: [build-base]
+    cmds:
+      - '{{.ENGINE}} build -f Containerfile -t {{.DEVBOX_REF}}
+         --build-arg BASE_IMAGE_REF={{.BASE_REF}}
+         --build-arg VCS_REF={{.VCS_REF}} --build-arg BUILD_DATE={{.BUILD_DATE}} .'
+
+  up:
+    desc: Start the DevBox
+    cmds: ['{{.ENGINE}} compose up -d devbox']
+
+  up-full:
+    desc: Start the DevBox + router + local model runtime
+    cmds: ['{{.ENGINE}} compose --profile full up -d']
+
+  down:
+    desc: Stop the stack (volumes kept)
+    cmds: ['{{.ENGINE}} compose down']
+
+  shell:
+    desc: Shell into the running DevBox
+    cmds: ['{{.ENGINE}} exec -it ai-devbox bash -l']
+    interactive: true
+
+  doctor:
+    desc: Run devbox doctor in a throwaway container
+    cmds: ['{{.ENGINE}} run --rm {{.DEVBOX_REF}} devbox doctor']
+
+  lint:
+    desc: Lint this repository
+    cmds:
+      - shellcheck -x -S warning $(find bin scripts tests -type f \( -name '*.sh' -o -name devbox -o -name ai -o -name mcp \))
+      - yamllint -c config/tools/yamllint.yaml .
+      - actionlint
+
+  test:
+    desc: Run the full test suite against the built image
+    deps: [lint]
+    cmds: ['ENGINE={{.ENGINE}} IMAGE={{.DEVBOX_REF}} BASE_IMAGE={{.BASE_REF}} tests/run.sh']
+
+  validate:
+    desc: Validate configuration without building
+    cmds: [tests/validate-config.sh]
+
+  scan:
+    desc: Scan the built image for vulnerabilities
+    cmds: ['trivy image --severity HIGH,CRITICAL --ignore-unfixed {{.DEVBOX_REF}}']
+
+  sbom:
+    desc: Generate an SBOM for the built image
+    cmds:
+      - mkdir -p sbom
+      - 'syft scan {{.DEVBOX_REF}} -o spdx-json=sbom/devbox.spdx.json -o cyclonedx-json=sbom/devbox.cdx.json'
+
+  sync:
+    desc: Regenerate AI instruction files from the canonical policy
+    cmds: [scripts/configure/render-ai-rules.sh]
+
+  sync-check:
+    desc: Fail if generated AI instruction files are stale
+    cmds: [scripts/configure/render-ai-rules.sh --check]
+
+  versions:
+    desc: Print the pinned version manifest
+    cmds: ['scripts/lib/versions.sh']

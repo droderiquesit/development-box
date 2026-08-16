@@ -1,0 +1,94 @@
+# =============================================================================
+# MCP TRUST PROFILES
+# =============================================================================
+# A trust profile is the ceiling on what any MCP server may do, regardless of
+# what that server's own entry in servers.yaml claims. The effective permission
+# is always the INTERSECTION of the two — a server can be more restricted than
+# its profile, never less.
+#
+#   mcp profile              show active
+#   mcp profile <name>       switch (recorded in the audit log)
+#   mcp profile list
+#
+# DEFAULT IS READ_ONLY. That is not timidity: the overwhelming majority of AI
+# assistance is reading and reasoning, and the profile you get by accident
+# should be the one that cannot damage anything.
+# =============================================================================
+
+apiVersion: devbox.mcp/v1
+kind: TrustProfiles
+metadata:
+  name: devbox-mcp-profiles
+
+default: READ_ONLY
+
+profiles:
+
+  READ_ONLY:
+    description: "Read and reason. Nothing is modified, nowhere. The default."
+    allowed_trust_levels: [high, medium]
+    max_access: read-only
+    allowed_servers: [filesystem, git, fetch, time, context7, terraform, sequential-thinking]
+    filesystem:
+      allowed_paths: ["/workspace"]
+      write: false
+    network:
+      allowed: true
+      allowlist_required: true
+    credentials:
+      # No server in this profile receives any credential at all.
+      passthrough: []
+    audit: true
+
+  DEVELOPER:
+    description: "The normal working profile: write to the workspace, open PRs, read GitHub. No infrastructure mutation."
+    allowed_trust_levels: [high, medium]
+    max_access: read-write
+    allowed_servers: [filesystem, git, github, fetch, time, context7, terraform, memory, sequential-thinking]
+    filesystem:
+      allowed_paths: ["/workspace"]
+      denied_paths:
+        - "~/.ssh"
+        - "~/.aws"
+        - "~/.azure"
+        - "~/.config/gcloud"
+        - "~/.kube"
+        - "~/.config/gh"
+        - "/run/secrets"
+      write: true
+    network:
+      allowed: true
+      allowlist_required: true
+    credentials:
+      # One credential, one server, narrowest useful scope.
+      passthrough: [GITHUB_PERSONAL_ACCESS_TOKEN]
+      required_scopes:
+        GITHUB_PERSONAL_ACCESS_TOKEN: "contents:read, pull_requests:write, issues:read"
+    audit: true
+
+  PRIVILEGED:
+    description: "Cluster and cloud read access. Time-boxed, explicitly opted into, and never the default."
+    allowed_trust_levels: [high, medium, restricted]
+    max_access: read-write
+    allowed_servers: "*"
+    filesystem:
+      allowed_paths: ["/workspace"]
+      denied_paths:
+        - "~/.ssh"
+        - "/run/secrets"
+      write: true
+    network:
+      allowed: true
+      allowlist_required: false
+    credentials:
+      passthrough: [GITHUB_PERSONAL_ACCESS_TOKEN, KUBECONFIG, AWS_PROFILE, AWS_REGION]
+    # Guardrails that make PRIVILEGED survivable:
+    requires_confirmation: true      # `mcp profile PRIVILEGED` prompts y/N
+    session_only: true               # never persisted; reverts on new shell
+    max_duration_minutes: 60         # auto-reverts to DEVELOPER
+    audit: true
+    audit_level: verbose             # every tool call, not just profile changes
+    warnings:
+      - "PRIVILEGED grants MCP servers access to real cluster and cloud credentials."
+      - "Use a read-only kubeconfig and a read-only IAM role. Never an admin context."
+      - "Reverts to DEVELOPER after 60 minutes or when this shell exits."

@@ -1,0 +1,142 @@
+# =============================================================================
+# MODEL PROFILES
+# =============================================================================
+# A profile bundles the four things that actually vary between kinds of work:
+#   which model, which tools, which MCP servers, and how much autonomy.
+#
+#   ai profile              show the active profile
+#   ai profile <name>       switch
+#   ai profile list         show all
+#
+# The active profile is written to $DEVBOX_AI_STATE/active-profile and shown in
+# the shell prompt, because "which permissions am I running with" is exactly the
+# thing you must never have to guess.
+#
+# permissions.write / permissions.execute are enforced by translating them into
+# the client's own permission config (see `devbox ai sync`), not by asking the
+# model nicely.
+# =============================================================================
+
+apiVersion: devbox.ai/v1
+kind: ModelProfiles
+metadata:
+  name: devbox-profiles
+
+default: balanced
+
+profiles:
+
+  fast:
+    description: "Quick questions, small edits, throwaway scripts. Optimised for latency and cost."
+    provider: anthropic
+    model: claude-fast
+    reviewer: null
+    cost_preference: low
+    max_output_tokens: 4096
+    permissions:
+      read: [/workspace]
+      write: [/workspace]
+      execute: SAFE                 # only the SAFE command class
+    mcp_profile: DEVELOPER
+    mcp_servers: [filesystem, git, time]
+
+  balanced:
+    description: "The everyday default. Good reasoning, sane cost, full developer tool access."
+    provider: anthropic
+    model: claude
+    reviewer: null
+    cost_preference: medium
+    max_output_tokens: 16384
+    permissions:
+      read: [/workspace]
+      write: [/workspace]
+      execute: REVIEW_REQUIRED
+    mcp_profile: DEVELOPER
+    mcp_servers: [filesystem, git, github, fetch, time, context7]
+
+  deep:
+    description: "Hard problems: tricky bugs, gnarly refactors, anything where being wrong is expensive."
+    provider: anthropic
+    model: claude-deep
+    reviewer: openai/codex          # second opinion from a different model family
+    cost_preference: high
+    max_output_tokens: 32768
+    permissions:
+      read: [/workspace]
+      write: [/workspace]
+      execute: REVIEW_REQUIRED
+    mcp_profile: DEVELOPER
+    mcp_servers: [filesystem, git, github, fetch, context7, sequential-thinking, memory]
+
+  local:
+    description: "Offline / air-gapped / data must not leave the building. Nothing leaves the host."
+    provider: ollama
+    model: local
+    reviewer: null
+    cost_preference: zero
+    max_output_tokens: 8192
+    permissions:
+      read: [/workspace]
+      write: [/workspace]
+      execute: SAFE
+    mcp_profile: READ_ONLY
+    mcp_servers: [filesystem, git]  # deliberately no network-facing server
+    network: offline
+
+  secure:
+    description: "Handling sensitive code. Read-only, no network egress from tools, local model."
+    provider: ollama
+    model: local
+    reviewer: null
+    cost_preference: zero
+    max_output_tokens: 8192
+    permissions:
+      read: [/workspace]
+      write: []                     # cannot write anything at all
+      execute: NONE
+    mcp_profile: READ_ONLY
+    mcp_servers: [filesystem]
+    network: offline
+
+  architecture:
+    description: "System design, tradeoff analysis, ADRs. Long context, no code execution."
+    provider: anthropic
+    model: claude-deep
+    reviewer: google/gemini         # different training data = different blind spots
+    cost_preference: high
+    max_output_tokens: 32768
+    permissions:
+      read: [/workspace]
+      write: [/workspace/docs, /workspace/adr]
+      execute: SAFE
+    mcp_profile: READ_ONLY
+    mcp_servers: [filesystem, git, github, fetch, context7, sequential-thinking]
+
+  terraform:
+    description: "Infrastructure as code. Registry-grounded so provider attributes are looked up, not invented."
+    provider: anthropic
+    model: claude
+    reviewer: openai/codex
+    cost_preference: medium
+    max_output_tokens: 16384
+    permissions:
+      read: [/workspace]
+      write: [/workspace]
+      execute: REVIEW_REQUIRED
+    mcp_profile: DEVELOPER
+    mcp_servers: [filesystem, git, terraform, context7, github]
+    rules_focus: [terraform, cloud, engineering, secrets]
+
+  code-review:
+    description: "Reviewing a diff. Read-only by construction — a reviewer that edits is not a reviewer."
+    provider: openai
+    model: codex
+    reviewer: anthropic/claude
+    cost_preference: medium
+    max_output_tokens: 16384
+    permissions:
+      read: [/workspace]
+      write: []
+      execute: SAFE
+    mcp_profile: READ_ONLY
+    mcp_servers: [filesystem, git, github]

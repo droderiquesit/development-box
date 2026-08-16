@@ -1,0 +1,210 @@
+# =============================================================================
+# AI ENGINEERING DEVBOX — compose stack
+# =============================================================================
+#   podman compose up -d                          the DevBox alone
+#   podman compose --profile ai-router up -d      + the LiteLLM model router
+#   podman compose --profile local-ai up -d       + Ollama for local models
+#   podman compose --profile full up -d           everything
+#
+# Works with `podman compose` (podman-compose or the Docker Compose v2 provider)
+# and with `docker compose`. Nothing here requires Docker Desktop.
+#
+# ARCHITECTURE NOTE
+#   The DevBox is one container. The router and the model runtime are separate
+#   containers *because they have different lifecycles and resource profiles* —
+#   not for the appearance of a microservice architecture. A 6 GB model runtime
+#   inside the development container would make the image unbuildable and would
+#   couple "I want a new Terraform version" to "re-download Llama".
+# =============================================================================
+
+x-devbox-security: &devbox-security
+  # Rootless by default. Inside a rootless container the container's uid maps to
+  # an unprivileged host uid, so this is defence in depth, not the only boundary.
+  security_opt:
+    - no-new-privileges:true
+    - label=disable          # remove if you run enforcing SELinux with a policy
+  cap_drop:
+    - ALL
+  cap_add:
+    # CHOWN/SETUID/SETGID are needed for `sudo` and for package installs inside
+    # the box. Drop these too (and set FEATURE_SUDO=0 at build) for a locked-down
+    # variant — see docs/security.md.
+    - CHOWN
+    - SETUID
+    - SETGID
+    - DAC_OVERRIDE
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # The DevBox itself. This is the container VS Code attaches to.
+  # ---------------------------------------------------------------------------
+  devbox:
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        BASE_IMAGE_REF: ${DEVBOX_BASE_IMAGE:-ai-devbox-base:latest}
+        DEV_UID: ${DEV_UID:-1000}
+        DEV_GID: ${DEV_GID:-1000}
+        FEATURE_CLOUD_AWS: ${FEATURE_CLOUD_AWS:-0}
+        FEATURE_CLOUD_AZURE: ${FEATURE_CLOUD_AZURE:-0}
+        FEATURE_CLOUD_GCP: ${FEATURE_CLOUD_GCP:-0}
+        FEATURE_K8S_LOCAL: ${FEATURE_K8S_LOCAL:-0}
+        FEATURE_AI_GEMINI: ${FEATURE_AI_GEMINI:-1}
+        FEATURE_AI_EXTRA: ${FEATURE_AI_EXTRA:-0}
+        FEATURE_MCP_BROWSER: ${FEATURE_MCP_BROWSER:-0}
+        FEATURE_MCP_KUBERNETES: ${FEATURE_MCP_KUBERNETES:-0}
+    image: ${DEVBOX_IMAGE:-ai-devbox:latest}
+    container_name: ai-devbox
+    hostname: devbox
+    <<: *devbox-security
+    user: "${DEV_UID:-1000}:${DEV_GID:-1000}"
+    init: true
+    stdin_open: true
+    tty: true
+    # Keeps the container alive for VS Code to attach to; the real work happens
+    # in exec'd shells.
+    command: ["sleep", "infinity"]
+
+    volumes:
+      # --- your code -------------------------------------------------------
+      # :z relabels for SELinux (shared). On a non-SELinux host it is ignored.
+      - ${DEVBOX_WORKSPACE_HOST:-./workspace}:/workspace:z
+
+      # --- persistent developer state --------------------------------------
+      # Named volumes, so destroying and rebuilding the container costs nothing.
+      - devbox-config:/home/dev/.config
+      - devbox-state:/home/dev/.local/state
+      - devbox-share:/home/dev/.local/share
+      - devbox-history:/home/dev/.bash_history.d
+
+      # --- caches: the difference between a 4-second and a 4-minute init ----
+      - tf-plugin-cache:/home/dev/.cache/terraform
+      - go-cache:/home/dev/.cache/go
+      - npm-cache:/home/dev/.cache/npm
+      - uv-cache:/home/dev/.cache/uv
+      - pip-cache:/home/dev/.cache/pip
+      - helm-cache:/home/dev/.cache/helm
+      - trivy-cache:/home/dev/.cache/trivy
+
+      # --- credentials: READ-ONLY, and opt-in -------------------------------
+      # Commented out by default. Uncomment only what you actually need, and
+      # keep :ro. An AI agent with write access to ~/.aws is a bad afternoon.
+      # - ${HOME}/.ssh:/home/dev/.ssh:ro
+      # - ${HOME}/.aws:/home/dev/.aws:ro
+      # - ${HOME}/.azure:/home/dev/.azure:ro
+      # - ${HOME}/.config/gcloud:/home/dev/.config/gcloud:ro
+      # - ${HOME}/.kube:/home/dev/.kube:ro
+      #
+      # Better than any of the above: use OIDC / workload identity / SSO and
+      # mount nothing. See docs/security.md.
+
+    environment:
+      # --- AI provider credentials -----------------------------------------
+      # Injected from the host environment or a .env file. NEVER baked into the
+      # image, never committed. The `${VAR:-}` form means an unset variable is
+      # simply absent rather than an error.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      # --- GitHub ----------------------------------------------------------
+      # Use a fine-grained PAT scoped to contents:read, pull_requests:write,
+      # issues:read. See mcp/profiles.yaml.
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_PERSONAL_ACCESS_TOKEN:-}
+      # --- cloud (prefer role assumption / OIDC over these) ------------------
+      AWS_PROFILE: ${AWS_PROFILE:-}
+      AWS_REGION: ${AWS_REGION:-}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      # --- devbox ------------------------------------------------------------
+      DEVBOX_ROUTER_URL: http://model-router:4000
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://local-model:11434}
+      TZ: ${TZ:-UTC}
+
+    healthcheck:
+      test: ["CMD", "/opt/devbox/bin/devbox", "doctor", "--quiet", "--core-only"]
+      interval: 2m
+      timeout: 30s
+      start_period: 20s
+      retries: 2
+
+    networks: [devbox]
+
+  # ---------------------------------------------------------------------------
+  # Model router (LiteLLM). One OpenAI-compatible endpoint in front of every
+  # provider, so switching provider is a config change rather than an
+  # integration. Deliberately has no volumes and no credentials beyond the model
+  # provider keys: it forwards chat completions and nothing else.
+  # ---------------------------------------------------------------------------
+  model-router:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: ai-devbox-router
+    profiles: [ai-router, full]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+    volumes:
+      - ./ai/models/router.yaml:/etc/litellm/config.yaml:ro,z
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AWS_REGION: ${AWS_REGION:-}
+      LITELLM_LOG: ${LITELLM_LOG:-ERROR}
+    # Not published to the host by default: the DevBox reaches it over the
+    # compose network. Publish it only if something outside needs it.
+    expose: ["4000"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:4000/health/liveliness')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [devbox]
+
+  # ---------------------------------------------------------------------------
+  # Local model runtime. Optional, and separate on purpose — see the note at the
+  # top of this file. If you already run Ollama on the host, do not start this;
+  # set OLLAMA_BASE_URL=http://host.containers.internal:11434 instead.
+  # ---------------------------------------------------------------------------
+  local-model:
+    image: docker.io/ollama/ollama:latest
+    container_name: ai-devbox-ollama
+    profiles: [local-ai, full]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ollama-models:/root/.ollama
+    expose: ["11434"]
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+      OLLAMA_MAX_LOADED_MODELS: 1
+    # GPU passthrough: uncomment for NVIDIA under rootless podman with CDI
+    # configured. CPU inference works without this, just slowly.
+    # devices:
+    #   - nvidia.com/gpu=all
+    networks: [devbox]
+
+volumes:
+  devbox-config:   {}
+  devbox-state:    {}
+  devbox-share:    {}
+  devbox-history:  {}
+  tf-plugin-cache: {}
+  go-cache:        {}
+  npm-cache:       {}
+  uv-cache:        {}
+  pip-cache:       {}
+  helm-cache:      {}
+  trivy-cache:     {}
+  ollama-models:   {}
+
+networks:
+  devbox:
+    driver: bridge

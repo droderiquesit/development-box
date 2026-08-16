@@ -1,0 +1,22 @@
+# =============================================================================
+# Dependabot — GitHub Actions only.
+# =============================================================================
+# Renovate (renovate.json) owns versions.yaml, which is where every tool version
+# lives. Dependabot cannot parse that file, but it is very good at Actions, so
+# each does the job it is actually good at rather than both doing half.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'ci'
+      include: scope
+    labels: [dependencies, github-actions]
+    groups:
+      actions:
+        patterns: ['*']

@@ -1,0 +1,53 @@
+# System-level git configuration shipped with the DevBox image.
+# Override anything here in ~/.gitconfig — it takes precedence.
+
+[init]
+	defaultBranch = main
+[pull]
+	# Merge commits from `git pull` are noise. Rebase, and refuse when it is
+	# ambiguous rather than guessing.
+	rebase = true
+[fetch]
+	prune = true
+	prunetags = true
+[push]
+	default = simple
+	autoSetupRemote = true
+	followTags = true
+[rebase]
+	autosquash = true
+	autostash = true
+[merge]
+	conflictstyle = zdiff3
+[diff]
+	algorithm = histogram
+	colorMoved = zebra
+	# Better hunk headers for the languages this box is built for.
+	tool = vimdiff
+[core]
+	editor = vim
+	autocrlf = input
+	pager = less -FRX
+[color]
+	ui = auto
+[rerere]
+	# Remember conflict resolutions. Pays for itself on the first long-lived branch.
+	enabled = true
+[log]
+	date = iso
+[status]
+	showUntrackedFiles = all
+[transfer]
+	fsckobjects = true
+[receive]
+	fsckObjects = true
+[safe]
+	directory = /workspace
+[alias]
+	st = status --short --branch
+	lg = log --oneline --graph --decorate
+	last = log -1 HEAD --stat
+	unstage = restore --staged
+	# Deliberately NOT defined: any alias for force-push, hard reset or
+	# history rewriting. Those are in the BLOCKED class for a reason, and an
+	# alias is exactly how they get run by accident.

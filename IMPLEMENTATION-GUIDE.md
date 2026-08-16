@@ -1,5 +1,19 @@
 # Development-Box Repository Implementation Guide
 
+> [!CAUTION]
+> **This file previously contained a live GitHub personal access token, committed
+> in plaintext.** The literal has been replaced with a placeholder, but *the
+> token is still present in this repository's git history* and must be treated as
+> compromised.
+>
+> **Revoke it now** at <https://github.com/settings/tokens>. Redacting the file
+> does not revoke the credential — anyone who cloned the repository, or who can
+> read any commit before this one, still has it.
+>
+> Going forward, use `gh auth login` (which stores the token in the OS keychain)
+> rather than exporting a PAT, and never paste a credential into a document.
+
+
 **Date:** August 15, 2026  
 **Owner:** David Roderiques (droderiques.it@gmail.com)  
 **Repository:** development-box
@@ -22,7 +36,7 @@ This document provides **3 implementation options** to create and secure your `d
 
 **Step 1: Set Environment Variable**
 ```bash
-export GITHUB_TOKEN="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"
+export GITHUB_TOKEN="<REDACTED-ROTATE-THIS-TOKEN>"
 ```
 
 **Step 2: Navigate to Your Project Directory**
@@ -149,7 +163,7 @@ git push origin main
 **Step 1: Create Repository via API**
 ```bash
 curl -X POST https://api.github.com/user/repos \
-  -H "Authorization: token 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" \
+  -H "Authorization: token <REDACTED-ROTATE-THIS-TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "development-box",
@@ -163,7 +177,7 @@ curl -X POST https://api.github.com/user/repos \
 **Step 2: Add Branch Protection**
 ```bash
 curl -X PUT https://api.github.com/repos/droderiquesit/development-box/branches/main/protection \
-  -H "Authorization: token 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" \
+  -H "Authorization: token <REDACTED-ROTATE-THIS-TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "required_status_checks": {
@@ -183,7 +197,7 @@ curl -X PUT https://api.github.com/repos/droderiquesit/development-box/branches/
 **Step 3: Add CODEOWNERS File**
 ```bash
 curl -X PUT https://api.github.com/repos/droderiquesit/development-box/contents/.github/CODEOWNERS \
-  -H "Authorization: token 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" \
+  -H "Authorization: token <REDACTED-ROTATE-THIS-TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "message": "chore: add CODEOWNERS file",

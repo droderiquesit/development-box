@@ -1,0 +1,146 @@
+---
+# =============================================================================
+# CI — fast checks on every push and pull request.
+# =============================================================================
+# Everything here must finish in a couple of minutes. Image builds live in
+# build-base.yml / build-devbox.yml so that a typo in a markdown file does not
+# cost twenty minutes of runner time.
+#
+# All third-party actions are pinned to a full commit SHA. Tags are mutable and a
+# compromised tag is a compromised build — `devbox github check` enforces this.
+name: ci
+
+"on":
+  push:
+    branches: [main, develop, 'claude/**']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  lint-shell:
+    name: shell
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends shellcheck
+          mapfile -t files < <(find bin scripts tests -type f \
+            \( -name '*.sh' -o -name devbox -o -name ai -o -name mcp \) 2>/dev/null)
+          printf 'checking %d files\n' "${#files[@]}"
+          shellcheck -x -S warning "${files[@]}"
+
+      - name: shfmt
+        run: |
+          go install mvdan.cc/sh/v3/cmd/shfmt@v3.12.0
+          "$(go env GOPATH)/bin/shfmt" -d -i 2 -ci bin scripts config/shell || {
+            echo "::error::shell formatting differs — run: shfmt -w -i 2 -ci bin scripts config/shell"
+            exit 1
+          }
+
+  lint-config:
+    name: yaml / json / actions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: yamllint
+        run: |
+          pip install --quiet yamllint==1.38.0
+          yamllint -c config/tools/yamllint.yaml .
+
+      - name: actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)/bin/actionlint" -color
+
+      - name: JSONC configuration parses
+        run: |
+          # .vscode and .devcontainer are JSONC (comments allowed), so validate
+          # them the way VS Code does rather than with a strict JSON parser.
+          npx --yes strip-json-comments-cli@5.0.0 < .devcontainer/devcontainer.json | jq empty
+          for f in .vscode/*.json; do
+            npx --yes strip-json-comments-cli@5.0.0 < "$f" | jq empty || exit 1
+            echo "ok $f"
+          done
+
+  validate-config:
+    name: devbox configuration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: install yq
+        run: go install github.com/mikefarah/yq/v4@v4.53.3
+
+      - name: validate versions.yaml, policies and MCP registry
+        run: |
+          GOPATH="$(go env GOPATH)"
+          export PATH="${GOPATH}/bin:$PATH"
+          tests/validate-config.sh
+
+      - name: generated AI instruction files are current
+        run: |
+          GOPATH="$(go env GOPATH)"
+          export PATH="${GOPATH}/bin:$PATH"
+          scripts/configure/render-ai-rules.sh --check
+
+  security:
+    name: secrets / SAST
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0        # gitleaks needs full history to be useful
+
+      - name: gitleaks
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          "$(go env GOPATH)/bin/gitleaks" git . --redact --verbose
+
+      - name: trivy config (IaC + Containerfiles)
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-config.sarif
+          exit-code: '0'
+
+      - name: upload SARIF
+        uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
+        if: always()
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+
+  docs:
+    name: markdown
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: markdownlint
+        run: npx --yes markdownlint-cli@0.46.0 '**/*.md' --ignore node_modules --disable MD013 MD033 MD041

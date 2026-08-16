@@ -1,0 +1,28 @@
+# Build context exclusions (used by podman/buildah as .containerignore and by
+# docker as .dockerignore — the two files are kept identical via `make sync`).
+.git
+.github
+docs
+examples
+tests
+*.md
+!README.md
+.vscode
+.devcontainer
+**/.terraform
+**/.terraform.lock.hcl
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+sbom/
+*.tar
+*.tar.gz
+.env
+.env.*
+*.pem
+*.key
+id_rsa*

@@ -1,0 +1,7 @@
+generated/
+.terraform/
+# .terraform.lock.hcl is deliberately COMMITTED: it pins provider versions, which
+# is correct practice and is also what makes `devbox terraform docs --check`
+# deterministic (terraform-docs reports resolved versions once init has run).
+*.tfstate
+*.tfstate.*

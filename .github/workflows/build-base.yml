@@ -1,0 +1,182 @@
+---
+# =============================================================================
+# Build and publish the BASE image.
+# =============================================================================
+# Runs only when something in the base actually changes — the OS package list,
+# the language runtimes, the shell, or the version manifest. That is the whole
+# point of splitting the images: a change to an AI prompt must not trigger a
+# 20-minute rebuild of the Go toolchain layer.
+name: build-base
+
+"on":
+  push:
+    branches: [main, develop]
+    paths:
+      - 'Containerfile.base'
+      - 'versions.yaml'
+      - 'scripts/lib/**'
+      - 'scripts/install/10-os-base.sh'
+      - 'scripts/install/20-languages.sh'
+      - 'config/shell/**'
+      - 'config/ca-certificates/**'
+      - '.github/workflows/build-base.yml'
+  pull_request:
+    paths:
+      - 'Containerfile.base'
+      - 'versions.yaml'
+      - 'scripts/install/1*.sh'
+      - 'scripts/install/2*.sh'
+      - 'config/shell/**'
+  schedule:
+    # Weekly, so OS security updates land without anyone remembering to ask.
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: Push to the registry
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}-base
+
+concurrency:
+  group: build-base-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build:
+    name: build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write        # cosign keyless signing
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Podman is what developers use locally, so CI builds with Podman too.
+      # A build that only works in BuildKit is not the build we ship.
+      - name: podman version
+        run: podman version
+
+      - name: derive tags
+        id: meta
+        run: |
+          {
+            echo "sha=$(git rev-parse --short HEAD)"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "version=$(git describe --tags --always --dirty)"
+            echo "arch=${{ matrix.platform }}" | tr '/' '-'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: build
+        run: |
+          podman build \
+            -f Containerfile.base \
+            -t "localhost/base:${{ steps.meta.outputs.sha }}" \
+            --build-arg VCS_REF="${{ steps.meta.outputs.sha }}" \
+            --build-arg BUILD_DATE="${{ steps.meta.outputs.date }}" \
+            --build-arg VERSION="${{ steps.meta.outputs.version }}" \
+            .
+
+      - name: smoke test
+        run: |
+          set -euo pipefail
+          img="localhost/base:${{ steps.meta.outputs.sha }}"
+          # The base image's contract: non-root, three working runtimes, uv.
+          podman run --rm "$img" bash -lc '
+            set -e
+            [ "$(id -u)" -ne 0 ] || { echo "FAIL: running as root"; exit 1; }
+            go version && node --version && python3 --version && uv --version
+            git --version && jq --version
+            touch /workspace/.probe && rm /workspace/.probe
+            echo "base image smoke test passed"
+          '
+
+      - name: SBOM
+        run: |
+          go install github.com/anchore/syft/cmd/syft@v1.51.0
+          "$(go env GOPATH)/bin/syft" scan \
+            "containers-storage:localhost/base:${{ steps.meta.outputs.sha }}" \
+            -o spdx-json=base.spdx.json -o cyclonedx-json=base.cdx.json
+
+      - name: vulnerability scan
+        run: |
+          go install github.com/anchore/grype/cmd/grype@v0.117.0
+          # Report, do not fail the build: a base-image CVE with no upstream fix
+          # must be visible without blocking every unrelated change. The
+          # scheduled rebuild is what actually resolves them.
+          "$(go env GOPATH)/bin/grype" sbom:base.cdx.json -o table --fail-on '' || true
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: base-sbom-${{ steps.meta.outputs.arch }}
+          path: base.*.json
+          retention-days: 30
+
+      # --- publish (main branch or explicit dispatch only) -------------------
+      - name: log in to the registry
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.push_image)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: push
+        id: push
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.push_image)
+        run: |
+          set -euo pipefail
+          arch=$(echo "${{ matrix.platform }}" | tr '/' '-')
+          dest="$REGISTRY/${IMAGE,,}"
+          podman tag "localhost/base:${{ steps.meta.outputs.sha }}" "$dest:${{ steps.meta.outputs.sha }}-$arch"
+          podman push "$dest:${{ steps.meta.outputs.sha }}-$arch"
+          echo "digest=$(podman inspect --format '{{index .RepoDigests 0}}' "$dest:${{ steps.meta.outputs.sha }}-$arch")" >> "$GITHUB_OUTPUT"
+
+      - name: sign (keyless)
+        if: steps.push.outcome == 'success'
+        run: |
+          go install github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
+          # Keyless: the signature is bound to this workflow's OIDC identity, so
+          # there is no signing key to store, rotate or leak.
+          COSIGN_EXPERIMENTAL=1 "$(go env GOPATH)/bin/cosign" sign --yes \
+            "${{ steps.push.outputs.digest }}"
+
+  manifest:
+    name: multi-arch manifest
+    needs: build
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.push_image)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: assemble and push the manifest list
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse --short HEAD)
+          dest="$REGISTRY/${IMAGE,,}"
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          podman manifest create "$dest:latest"
+          for arch in linux-amd64 linux-arm64; do
+            podman manifest add "$dest:latest" "docker://$dest:$sha-$arch"
+          done
+          podman manifest push --all "$dest:latest" "docker://$dest:latest"
+          podman manifest push --all "$dest:latest" "docker://$dest:$sha"

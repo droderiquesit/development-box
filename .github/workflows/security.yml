@@ -1,0 +1,147 @@
+---
+# =============================================================================
+# Scheduled deep security scan.
+# =============================================================================
+# Separate from ci.yml because these checks are slow and, critically, because a
+# NEW CVE against an UNCHANGED image is a thing that must be discovered on a
+# schedule. CI only ever tells you about the code you just wrote.
+name: security
+
+"on":
+  schedule:
+    - cron: '0 4 * * *'          # daily
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'versions.yaml'
+      - 'Containerfile*'
+      - '.github/workflows/security.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+
+  image-vulnerabilities:
+    name: published image CVEs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - ghcr.io/${{ github.repository }}:latest
+          - ghcr.io/${{ github.repository }}-base:latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: trivy
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+        continue-on-error: true      # the image may not be published yet
+
+      - uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
+        if: hashFiles('trivy.sarif') != ''
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-${{ strategy.job-index }}
+
+  repository:
+    name: repository scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks (full history)
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          "$(go env GOPATH)/bin/gitleaks" git . --redact --verbose
+
+      - name: semgrep
+        run: |
+          pipx install semgrep==1.145.0
+          semgrep scan --config p/ci --sarif --output semgrep.sarif --metrics=off . || true
+
+      - uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
+        if: hashFiles('semgrep.sarif') != ''
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  policy:
+    name: policy conformance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: install conftest and OPA
+        run: |
+          go install github.com/open-policy-agent/conftest@v0.69.0
+          go install github.com/open-policy-agent/opa@v1.19.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Rego unit tests
+        run: opa test security/policy -v
+
+      - name: Containerfiles conform to the image policy
+        run: |
+          # The image policy asserts the things §31 requires: non-root user,
+          # pinned base, no embedded secrets, explicit healthcheck.
+          conftest test --policy security/policy/container Containerfile Containerfile.base
+
+      - name: MCP registry conforms to the MCP policy
+        run: |
+          conftest test --policy security/policy/mcp mcp/servers.yaml
+
+  supply-chain:
+    name: supply chain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: verify every third-party action is pinned to a commit SHA
+        run: |
+          set -euo pipefail
+          unpinned=$(grep -rhoE 'uses:[[:space:]]*[A-Za-z0-9._-]+/[A-Za-z0-9._-]+@[A-Za-z0-9._/-]+' \
+                     .github/workflows | grep -vE '@[0-9a-f]{40}$' || true)
+          if [ -n "$unpinned" ]; then
+            echo "::error::third-party actions pinned to mutable tags:"
+            printf '%s\n' "$unpinned"
+            exit 1
+          fi
+          echo "all third-party actions are pinned to commit SHAs"
+
+      - name: verify image signatures
+        run: |
+          go install github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
+          COSIGN_EXPERIMENTAL=1 "$(go env GOPATH)/bin/cosign" verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.*" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "ghcr.io/${{ github.repository }}:latest" \
+            || echo "::warning::image signature not yet available (expected before the first publish)"
