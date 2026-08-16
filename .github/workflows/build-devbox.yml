@@ -180,12 +180,21 @@ jobs:
             github.com/anchore/syft/cmd/syft@v1.51.0
             github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
 
+      - name: enable the podman API socket
+        run: |
+          # syft and trivy read images through the podman API, not the
+          # containers-storage files directly — rootless storage layouts are
+          # version-coupled and syft's containers-storage parsing failed on the
+          # runner. The socket is the supported interface.
+          systemctl --user enable --now podman.socket
+          podman info --format '{{.Host.RemoteSocket.Path}}' || true
+
       - name: SBOM
         run: |
           set -euo pipefail
           mkdir -p sbom
           syft scan \
-            "containers-storage:localhost/devbox:${{ steps.meta.outputs.sha }}" \
+            "podman:localhost/devbox:${{ steps.meta.outputs.sha }}" \
             -o spdx-json=sbom/devbox.spdx.json \
             -o cyclonedx-json=sbom/devbox.cdx.json
           echo "packages: $(jq '.packages | length' sbom/devbox.spdx.json)"
@@ -194,10 +203,10 @@ jobs:
 
       - name: vulnerability scan (SARIF)
         run: |
-          # The image is in podman's local store, not a registry, so point Trivy
-          # at the containers-storage transport rather than a pullable name.
+          # The image is in podman's local store, not a registry — read it
+          # through the podman API socket enabled above.
           trivy image \
-            --image-src containerd,podman \
+            --image-src podman \
             "localhost/devbox:${{ steps.meta.outputs.sha }}" \
             --format sarif --output trivy-image.sarif \
             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
