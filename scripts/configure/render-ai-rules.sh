@@ -19,7 +19,20 @@ CHECK=0
 [ "${1:-}" = "--check" ] && CHECK=1
 
 TARGET_DIR="${2:-$(repo_root)}"
-[ -n "$POLICY_FILE" ] || abort "ai/policies/policy.yaml not found"
+
+# POLICY_FILE comes from cfg_file(), which searches ~/.config/devbox then
+# /opt/devbox — the right answer inside the image, and no answer at all on a
+# bare CI runner or a plain `git clone`, where the policy lives in the checkout.
+#
+# Fall back to the checkout HERE and only here. Teaching cfg_file() to search
+# the repository would apply to the running CLIs too, and then any repo you
+# opened in the DevBox could ship its own ai/policies/policy.yaml and quietly
+# redefine which commands count as SAFE. This script is different: operating on
+# a source checkout is its entire job, and the directory is passed in.
+if [ -z "$POLICY_FILE" ] && [ -r "${TARGET_DIR}/ai/policies/policy.yaml" ]; then
+  POLICY_FILE="${TARGET_DIR}/ai/policies/policy.yaml"
+fi
+[ -n "$POLICY_FILE" ] || abort "ai/policies/policy.yaml not found (looked in \$DEVBOX_CONFIG, \$DEVBOX_ROOT and ${TARGET_DIR})"
 
 GEN_HEADER_MD='<!--
   GENERATED FILE — DO NOT EDIT.

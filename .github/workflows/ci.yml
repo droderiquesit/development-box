@@ -153,6 +153,12 @@ jobs:
       - name: trivy config (IaC + Containerfiles)
         id: trivy
         uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        env:
+          # aquasecurity/setup-trivy resolves the release tag through the GitHub
+          # API. Unauthenticated, that call is rate-limited per runner IP and
+          # fails the install with a bare "exit code 1" that says nothing about
+          # rate limits. The token makes it an authenticated call.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           scan-type: config
           scan-ref: .
