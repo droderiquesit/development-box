@@ -24,14 +24,29 @@ duplicate output trains people to skim.
 
 ## Base image and platform
 
+> **ADR: the base image moved to its own repository.** As of the base/DevBox
+> repository split, the base image's entire lifecycle — distro choice,
+> runtime pins, hardening, build, test, scan, sign, versioning — is owned by
+> the **Base Image Factory** repository
+> ([`droderiquesit/ai-devbox`](https://github.com/droderiquesit/ai-devbox);
+> see its `docs/adr/001-separate-base-image-factory.md` for the full decision
+> record and `docs/image-contract.md` for the enforced boundary of what a
+> base provides vs. what this repository adds). This repository consumes a
+> published, versioned, signed release of the factory's `ai-engineering`
+> image — pinned by repo+version+digest in the `base:` section of
+> `versions.yaml` — exactly the way any third project could. The dependency
+> direction is one-way: factory → registry → DevBox, never the reverse.
+> The rows below record the platform decisions as originally made; the
+> distro-level ones are now maintained in the factory.
+
 | Choice | Verdict | Reason |
 |---|---|---|
-| Ubuntu 24.04 LTS | REQUIRED | Every vendor this box depends on (HashiCorp, Microsoft, Google, GitHub, Aqua, NodeSource) publishes a `noble` apt repo. Supported to 2029. |
+| Ubuntu 24.04 LTS | REQUIRED | Every vendor this box depends on (HashiCorp, Microsoft, Google, GitHub, Aqua, NodeSource) publishes a `noble` apt repo. Supported to 2029. *(now owned by the factory)* |
 | Debian trixie | REJECTED | Patchier vendor apt coverage. A missing vendor repo means an unverified tarball, which is what we are avoiding. |
 | Alpine | REJECTED | musl breaks a long tail of prebuilt binaries and Python wheels. A dev container is not where you debug musl-vs-glibc. |
 | Distroless | REJECTED | This container's entire purpose is to run a shell. |
 | Podman (rootless) | REQUIRED | Explicit requirement, and the right default: no daemon, no Docker Desktop licence, rootless by design. |
-| Two images (base + devbox) | REQUIRED | 4-minute rebuilds instead of 25. A CVE in an AI CLI must not force a Go toolchain rebuild. |
+| Two images (base + devbox) | REQUIRED | 4-minute rebuilds instead of 25. A CVE in an AI CLI must not force a Go toolchain rebuild. Now realised as two *repositories*, not just two Containerfiles — see the ADR note above. |
 
 ---
 

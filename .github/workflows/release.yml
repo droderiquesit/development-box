@@ -2,13 +2,15 @@
 # =============================================================================
 # RELEASE — tag a DevBox version, publish signed images, attach the SBOM.
 # =============================================================================
-# Triggered by a `v*.*.*` tag. This is the DEVBOX stream only; the base image
-# has its own stream and its own `base-v*` tags in build-base.yml.
+# Triggered by a `v*.*.*` tag. This releases the DEVBOX only; the base image
+# is an external dependency with its own release stream in the Base Image
+# Factory repository (droderiquesit/ai-devbox, `ai-engineering-v*` releases).
 #
 # This build does NOT build a base image. It pulls the base release pinned in
-# `release.base` in versions.yaml, exactly as build-devbox does. A release that
-# quietly rebuilt its own base would ship a foundation that no test suite had
-# ever seen, and would make "which base is DevBox 1.2.0 on?" unanswerable.
+# the `base:` section of versions.yaml, exactly as build-devbox does. A
+# release that quietly rebuilt its own base would ship a foundation that no
+# test suite had ever seen, and would make "which base is DevBox 1.2.0 on?"
+# unanswerable.
 #
 # Release checklist this encodes:
 #   * the tag and versions.yaml must agree, or the build stops
@@ -120,7 +122,7 @@ jobs:
           set -euo pipefail
           base='${{ steps.v.outputs.base }}'
           if ! podman pull "$base"; then
-            echo "::error::pinned base ${base} is not in the registry. Publish it (tag base-v${{ steps.v.outputs.base_version }}) before releasing the DevBox."
+            echo "::error::pinned base ${base} is not in the registry. Publish it from the Base Image Factory (droderiquesit/ai-devbox, release ai-engineering-v${{ steps.v.outputs.base_version }}) before releasing the DevBox."
             exit 1
           fi
           echo "digest=$(podman image inspect --format '{{index .RepoDigests 0}}' "$base")" >> "$GITHUB_OUTPUT"

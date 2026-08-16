@@ -41,12 +41,18 @@ if yq -e '.' versions.yaml >/dev/null 2>&1; then ok "parses as YAML"; else no "i
 # The awk-based parser in scripts/lib/versions.sh must agree with yq. If it does
 # not, the image would be built with different versions than the manifest states,
 # which is the worst kind of drift because nothing reports it.
-mapfile -t shell_vars < <(./scripts/lib/versions.sh 2>/dev/null | sed 's/^export //')
+#
+# DEVBOX_VERSIONS_FILE is pinned explicitly: inside a running DevBox the shell
+# profile exports it pointing at the IMAGE's baked copy, and without the
+# override this check would silently compare the repo's yq-parse against the
+# image's shell-parse — two different files, and a guaranteed false "drift"
+# the first time the schema changes between releases.
+mapfile -t shell_vars < <(DEVBOX_VERSIONS_FILE=./versions.yaml ./scripts/lib/versions.sh 2>/dev/null | sed 's/^export //')
 if [ "${#shell_vars[@]}" -gt 40 ]; then ok "shell parser emits ${#shell_vars[@]} variables"
 else no "shell parser emitted only ${#shell_vars[@]} variables — expected 40+"; fi
 
 drift=0
-for sec in languages iac kubernetes security tools ai mcp; do
+for sec in base iac kubernetes security tools ai mcp; do
   while IFS= read -r key; do
     [ -n "$key" ] || continue
     want="$(yq -r ".${sec}.${key}" versions.yaml)"
@@ -67,7 +73,7 @@ done < <(awk '
   /^  # renovate:/ { ann=1; next }
   /^  [a-z_0-9]+:/ {
     val=$2; gsub(/"/,"",val)
-    if (!ann && val != "latest" && val != "apt" && val !~ /^[0-9]$/ && $1 !~ /^(python|schema|base_image|base_tag|base_digest|awscli|azurecli|gcloud|github_image|terraform_image):$/)
+    if (!ann && val != "latest" && val != "apt" && val !~ /^[0-9]$/ && $1 !~ /^(python|schema|devbox|repo|version|digest|awscli|azurecli|gcloud|github_image|terraform_image):$/)
       print $1 " " val
     ann=0; next
   }
@@ -241,36 +247,52 @@ done < <(yq -r '.workflows[].steps[] | select(.kind == "agent") | .role' ai/mode
 
 # ---------------------------------------------------------------------------
 sect "release model"
-# Two independent version streams, and the DevBox consumes a PUBLISHED base
-# rather than rebuilding one. These checks exist because every one of them is a
-# way the model can silently degrade back into "rebuild everything each time".
-for k in base devbox; do
-  v="$(yq -r ".release.${k} // \"\"" versions.yaml)"
-  if printf '%s' "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-    ok "release.${k} is a semver (${v})"
-  else
-    no "release.${k} must be MAJOR.MINOR.PATCH, got '${v}'"
-  fi
-done
+# The DevBox versions itself in release.devbox and consumes a PUBLISHED
+# EXTERNAL base — a Base Image Factory release named fully in the `base:`
+# section. These checks exist because every one of them is a way the model
+# can silently degrade back into "rebuild everything each time".
+v="$(yq -r '.release.devbox // ""' versions.yaml)"
+if printf '%s' "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  ok "release.devbox is a semver (${v})"
+else
+  no "release.devbox must be MAJOR.MINOR.PATCH, got '${v}'"
+fi
 
-pinned_base="$(yq -r '.release.base' versions.yaml)"
+pinned_base="$(yq -r '.base.version // ""' versions.yaml)"
+base_repo="$(yq -r '.base.repo // ""' versions.yaml)"
+if printf '%s' "$pinned_base" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  ok "base.version is a semver (${pinned_base})"
+else
+  no "base.version must be MAJOR.MINOR.PATCH, got '${pinned_base}'"
+fi
+case "$base_repo" in
+  ghcr.io/*/*) ok "base.repo is a fully-named registry repository (${base_repo})" ;;
+  *) no "base.repo must be a full registry repository, got '${base_repo}'" ;;
+esac
+# The base must be EXTERNAL — pointing it back at an image this repository
+# publishes would quietly reintroduce the circular ownership the split removed.
+case "$base_repo" in
+  */development-box*) no "base.repo points at this repository's own namespace — the base must be external" ;;
+  *) ok "base.repo is external to this repository" ;;
+esac
 
-# The Containerfile's default base ref must name the pinned version. If it
-# drifts, a local `podman build` silently produces a DevBox on a different
-# foundation than CI built, and the two are indistinguishable afterwards.
+# The Containerfile's default base ref must name the pinned repo AND version.
+# If it drifts, a local `podman build` silently produces a DevBox on a
+# different foundation than CI built, and the two are indistinguishable
+# afterwards.
 cf_base="$(awk -F= '/^ARG BASE_IMAGE_REF=/{print $2; exit}' Containerfile)"
 case "$cf_base" in
-  *":${pinned_base}") ok "Containerfile default base matches release.base (${pinned_base})" ;;
-  *:latest | *:edge) no "Containerfile default base is a floating tag (${cf_base}) — pin it to release.base" ;;
-  *) no "Containerfile default base '${cf_base}' does not match release.base '${pinned_base}'" ;;
+  "${base_repo}:${pinned_base}") ok "Containerfile default base matches base.repo:version" ;;
+  *:latest | *:edge) no "Containerfile default base is a floating tag (${cf_base}) — pin it to base.version" ;;
+  *) no "Containerfile default base '${cf_base}' does not match '${base_repo}:${pinned_base}'" ;;
 esac
 
 # Same for compose, which is what `docker compose up` and the devcontainer use.
-compose_base="$(awk -F'-' '/BASE_IMAGE_REF: \$\{DEVBOX_BASE_IMAGE:/{sub(/\}.*/,"",$NF); print $NF; exit}' compose.yaml)"
+compose_base="$(awk '/BASE_IMAGE_REF: \$\{DEVBOX_BASE_IMAGE:/{sub(/.*DEVBOX_BASE_IMAGE:-/,"");sub(/\}.*/,"");print;exit}' compose.yaml)"
 case "$compose_base" in
-  *":${pinned_base}") ok "compose default base matches release.base (${pinned_base})" ;;
+  "${base_repo}:${pinned_base}") ok "compose default base matches base.repo:version" ;;
   "") no "compose.yaml has no BASE_IMAGE_REF default" ;;
-  *) no "compose default base '${compose_base}' does not match release.base '${pinned_base}'" ;;
+  *) no "compose default base '${compose_base}' does not match '${base_repo}:${pinned_base}'" ;;
 esac
 
 # The registry is the source of base images. A local-only default would work on

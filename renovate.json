@@ -38,10 +38,10 @@
     },
     {
       "customType": "regex",
-      "description": "Base image digest",
+      "description": "The external base image (a Base Image Factory release) — version and digest move together. THIS is the automated base-update path: the factory publishes ai-engineering-vX.Y.Z, Renovate sees the new tag on the GHCR repo named in base.repo, and opens a PR bumping base.version+base.digest here — which build-devbox.yml then builds and runs the full test suite against before it can merge. Nothing consumes an untested base.",
       "managerFilePatterns": ["/^versions\\.yaml$/"],
       "matchStrings": [
-        "base_image:\\s*(?<depName>\\S+)[\\s\\S]*?base_tag:\\s*\"(?<currentValue>[^\"]+)\"[\\s\\S]*?base_digest:\\s*\"(?<currentDigest>sha256:[a-f0-9]+)\""
+        "base:[\\s\\S]*?repo:\\s*(?<depName>\\S+)[\\s\\S]*?version:\\s*\"(?<currentValue>[^\"]+)\"[\\s\\S]*?digest:\\s*\"(?<currentDigest>sha256:[a-f0-9]+)\""
       ],
       "datasourceTemplate": "docker"
     }
@@ -95,12 +95,12 @@
       "labels": ["dependencies", "kubernetes"]
     },
     {
-      "description": "Language runtimes are reviewed individually — a Go or Node major bump can change behaviour in ways a grouped PR hides.",
+      "description": "Base-image bumps are reviewed individually and labelled — this is the DevBox's foundation changing, and the PR's CI run against the new base is the acceptance gate.",
       "matchFileNames": ["versions.yaml"],
-      "matchPackageNames": ["golang/**", "nodejs/**", "python/**"],
+      "matchPackageNames": ["ghcr.io/droderiquesit/ai-devbox/**"],
       "groupName": null,
-      "labels": ["dependencies", "runtime"],
-      "minimumReleaseAge": "7 days"
+      "labels": ["dependencies", "base-image"],
+      "automerge": false
     },
     {
       "description": "Major bumps are never automatic. Somebody reads the changelog.",

@@ -22,14 +22,16 @@ REGISTRY      ?= ghcr.io
 OWNER_REPO    ?= $(or $(shell git config --get remote.origin.url 2>/dev/null \
                    | sed -E 's#(git@|https://)github\.com[:/]##; s#\.git$$##' \
                    | tr 'A-Z' 'a-z'),droderiquesit/development-box)
-BASE_IMAGE    ?= $(REGISTRY)/$(OWNER_REPO)-base
 DEVBOX_IMAGE  ?= $(REGISTRY)/$(OWNER_REPO)
 TAG           ?= latest
 
-# The BASE version this DevBox builds on. Read from versions.yaml so the
-# Makefile, compose and CI cannot drift apart. Bumping it there is the base
-# patching mechanism; nothing here needs to change.
-BASE_VERSION  ?= $(shell awk '/^release:/{r=1;next} r&&/^  base:/{gsub(/.*: *"?|"$$/,"");print;exit} r&&/^[^ ]/{exit}' versions.yaml)
+# The base image is an EXTERNAL dependency — a published Base Image Factory
+# release, named fully (repo + version) in versions.yaml's `base:` section,
+# never derived from this repository's identity. Read from versions.yaml so
+# the Makefile, compose and CI cannot drift apart. Bumping it there is the
+# base patching mechanism; nothing here needs to change.
+BASE_IMAGE    ?= $(shell awk '/^base:/{r=1;next} r&&/^  repo:/{gsub(/.*: *"?|"$$/,"");print;exit} r&&/^[^ ]/{exit}' versions.yaml)
+BASE_VERSION  ?= $(shell awk '/^base:/{r=1;next} r&&/^  version:/{gsub(/[ \t]+\#.*$$/,"");gsub(/.*: *"?|"$$/,"");print;exit} r&&/^[^ ]/{exit}' versions.yaml)
 
 VCS_REF       := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)

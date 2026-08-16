@@ -9,7 +9,11 @@ version: '3'
 vars:
   ENGINE: '{{.ENGINE | default "podman"}}'
   TAG: '{{.TAG | default "latest"}}'
-  BASE_REF: '{{.BASE_IMAGE | default "ai-devbox-base"}}:{{.TAG | default "latest"}}'
+  # The base is the published Base Image Factory release pinned in
+  # versions.yaml's `base:` section — same source of truth as the Makefile
+  # and CI, so none of them can drift apart.
+  BASE_REF:
+    sh: .github/scripts/image-ref.sh base
   DEVBOX_REF: '{{.DEVBOX_IMAGE | default "ai-devbox"}}:{{.TAG | default "latest"}}'
   VCS_REF:
     sh: git rev-parse --short HEAD 2>/dev/null || echo unknown
