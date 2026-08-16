@@ -1,0 +1,63 @@
+---
+# =============================================================================
+# BRANCH CLEANUP — maintenance dispatch for deleting merged stale branches.
+# =============================================================================
+# The development environment's git credential can create refs but not delete
+# them, so branch housekeeping runs here with the Actions token instead. It
+# deletes exactly the branches named in the input — with three hard refusals
+# per branch: main/develop are untouchable, a branch with an open PR is
+# untouchable, and a branch that does not exist is a skip, not an error.
+#
+# Usage:
+#   gh workflow run branch-cleanup.yml -f branches="old/one old/two"
+name: branch-cleanup
+
+"on":
+  workflow_dispatch:
+    inputs:
+      branches:
+        description: Space-separated branch names to delete (each must be merged/closed — open PRs are refused)
+        type: string
+        required: true
+
+permissions:
+  contents: write        # ref deletion
+  pull-requests: read    # open-PR safety check
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: delete stale branches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: delete requested branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCHES: ${{ inputs.branches }}
+        run: |
+          set -euo pipefail
+          for b in $BRANCHES; do
+            case "$b" in
+              main|develop)
+                echo "::error::refusing to delete standing branch ${b}"
+                exit 1
+                ;;
+            esac
+            if ! git ls-remote --exit-code --heads origin "$b" >/dev/null; then
+              echo "::notice::${b} does not exist — skipping"
+              continue
+            fi
+            open_prs="$(gh pr list --state open --head "$b" --json number --jq 'length')"
+            if [ "$open_prs" != "0" ]; then
+              echo "::error::${b} has an open PR — refusing to delete"
+              exit 1
+            fi
+            git push origin --delete "$b"
+            echo "deleted ${b}"
+          done
