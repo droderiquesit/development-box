@@ -155,6 +155,16 @@ USER ${DEV_USER}
 WORKDIR /workspace
 ENV HOME=/home/${DEV_USER}
 
+# PATH is an IMAGE property, not a login-shell property. HEALTHCHECK,
+# `docker exec <cmd>`, VS Code server processes and CI run-steps all execute
+# without a login shell; when the tool roots only enter PATH through
+# /etc/devbox/shell.d/00-env.sh, every one of those contexts sees a crippled
+# image — the healthcheck reported `yq`/`claude`/`codex` missing while an
+# interactive shell in the same container found all three. Order mirrors the
+# profile: user overrides > devbox CLIs > npm/uv tool roots > Go > system.
+# The profile's idempotent prepends then agree with this instead of fighting it.
+ENV PATH=/home/${DEV_USER}/.local/bin:/opt/devbox/bin:/opt/devbox/npm-global/bin:/opt/devbox/uv-tools/bin:/home/${DEV_USER}/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 # `devbox doctor --quiet` is the health check: it exercises the real tool
 # surface rather than asserting that a single binary happens to exist.
 HEALTHCHECK --interval=2m --timeout=30s --start-period=20s --retries=2 \
