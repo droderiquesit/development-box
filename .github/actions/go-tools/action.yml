@@ -29,7 +29,11 @@ inputs:
   go-version:
     description: Go toolchain to build the tools with.
     required: false
-    default: '1.25'
+    # Tracks versions.yaml languages.go (major.minor). grype v0.117+ requires
+    # go >= 1.26.3, and setup-go pins GOTOOLCHAIN=local, so an older default
+    # fails the install instead of auto-upgrading. The toolchain version is
+    # part of the cache key, so bumping this cleanly invalidates old entries.
+    default: '1.26'
 
 outputs:
   gobin:
