@@ -234,7 +234,23 @@ jobs:
         run: |
           # Keyless: the signature is bound to this workflow's OIDC identity, so
           # there is no signing key to store, rotate or leak.
-          COSIGN_EXPERIMENTAL=1 cosign sign --yes "${{ steps.push.outputs.digest }}"
+          #
+          # Sigstore's public Rekor instance is shared and rate-limited; cosign
+          # retries a single POST internally but can still give up on a plain
+          # transient blip. Retry the whole call too — signing the same digest
+          # twice is harmless (it just adds another transparency-log entry).
+          retry() {
+            local attempt=1 max=4 delay=15
+            until "$@"; do
+              [ "$attempt" -ge "$max" ] && return 1
+              echo "::warning::attempt ${attempt}/${max} failed — retrying in ${delay}s: $*"
+              sleep "$delay"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
+          export COSIGN_EXPERIMENTAL=1
+          retry cosign sign --yes "${{ steps.push.outputs.digest }}"
 
   # ---------------------------------------------------------------------------
   # Multi-arch manifest, plus the semver ladder and release for a `base-v*` tag.
@@ -343,7 +359,22 @@ jobs:
             echo "::warning::could not resolve a digest for $dest:$version — not signing a mutable tag"
             exit 0
           fi
-          COSIGN_EXPERIMENTAL=1 cosign sign --yes "${dest}@${digest}"
+          # Sigstore's public Rekor instance is shared and rate-limited; cosign
+          # retries a single POST internally but can still give up on a plain
+          # transient blip. Retry the whole call too — signing the same digest
+          # twice is harmless (it just adds another transparency-log entry).
+          retry() {
+            local attempt=1 max=4 delay=15
+            until "$@"; do
+              [ "$attempt" -ge "$max" ] && return 1
+              echo "::warning::attempt ${attempt}/${max} failed — retrying in ${delay}s: $*"
+              sleep "$delay"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
+          export COSIGN_EXPERIMENTAL=1
+          retry cosign sign --yes "${dest}@${digest}"
 
       - name: GitHub release
         if: steps.intent.outputs.release == 'true'
