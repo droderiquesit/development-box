@@ -50,7 +50,7 @@ via `devbox doctor` · centrally governed · model-agnostic.
 git clone https://github.com/droderiquesit/development-box.git
 cd development-box
 
-make build            # base image, then the devbox image
+make build            # pulls the published base release, builds the devbox
 podman compose up -d
 
 podman exec -it ai-devbox bash -l
@@ -120,12 +120,17 @@ podman machine start
 
 ## Installation
 
-```bash
-# 1 — base image: OS, non-root user, Go/Node/Python. Slow, rarely rebuilt.
-make build-base
+The base image (OS, non-root user, Go/Node/Python + uv) is an external
+dependency — a published, signed release of the [Base Image
+Factory](https://github.com/droderiquesit/ai-devbox), pinned by
+repo + version + digest in `versions.yaml`. It is pulled, never built here.
 
-# 2 — devbox image: everything else. ~4 minutes on a rebuild.
-make build-devbox
+```bash
+# 1 — pull the pinned base release, then build the devbox image (~4 min).
+make build
+
+# rebuild just the devbox layer (the common case)
+make rebuild
 
 # with optional modules
 make build-devbox FEATURE_CLOUD_AWS=1 FEATURE_CLOUD_AZURE=1
