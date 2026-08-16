@@ -50,7 +50,7 @@ base:
   repo: ghcr.io/droderiquesit/ai-devbox/ai-engineering
   # renovate: the custom manager in renovate.json tracks version+digest as one
   version: "1.0.0"
-  digest: "sha256:fb253925e8a5f069e1a745ec3422d9ddfb892981bc44fe535dae9a09baa76a59"
+  digest: "sha256:19136c55e66cd631bfe92396576eeed0c9eba3f6948d0a9578e0cddeaa90c151"
 
 # -----------------------------------------------------------------------------
 # Infrastructure as Code
