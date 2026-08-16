@@ -69,6 +69,10 @@ USER root
 SHELL ["/bin/bash", "-lc"]
 
 ARG BASE_IMAGE_REF
+# The manifest digest the base ref resolved to at build time — CI passes it
+# from the resolve step so the shipped image names its exact foundation, not
+# just the tag that was asked for. "unknown" only in ad-hoc local builds.
+ARG BASE_IMAGE_DIGEST=unknown
 ARG DEV_USER=dev
 ARG DEV_UID=1000
 ARG DEV_GID=1000
@@ -93,7 +97,8 @@ LABEL org.opencontainers.image.title="ai-devbox" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.base.name="${BASE_IMAGE_REF}"
+      org.opencontainers.image.base.name="${BASE_IMAGE_REF}" \
+      org.opencontainers.image.base.digest="${BASE_IMAGE_DIGEST}"
 
 ENV FEATURE_CLOUD_AWS=${FEATURE_CLOUD_AWS} \
     FEATURE_CLOUD_AZURE=${FEATURE_CLOUD_AZURE} \
