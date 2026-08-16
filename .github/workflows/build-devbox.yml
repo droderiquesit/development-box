@@ -301,7 +301,23 @@ jobs:
             done
           }
           retry cosign sign --yes "${{ steps.push.outputs.digest }}"
-          retry cosign attest --yes \
+
+          # `attest` hits a known, still-open upstream limitation: Rekor's
+          # public instance rejects the in-toto attestation once the embedded
+          # predicate (our full SPDX SBOM, multi-MB for an image this size)
+          # makes the entry too large — confirmed 8/8 failures across two
+          # release.yml v1.0.0 attempts, every one within ~1-2s of the POST
+          # (too fast to be a slow-upload timeout).
+          # https://github.com/sigstore/cosign/issues/3599
+          #
+          # --tlog-upload=false skips the public transparency-log entry for
+          # THIS attestation only — the image signature above stays fully
+          # Rekor-anchored. The SBOM attestation is still Fulcio-signed and
+          # bound to this workflow's OIDC identity, but without a tlog entry
+          # that cannot be re-proven once the ephemeral cert expires, so
+          # `cosign verify-attestation` needs `--insecure-ignore-tlog` — see
+          # docs/releases.md. Revisit once cosign/Rekor#3599 is resolved.
+          retry cosign attest --yes --tlog-upload=false \
             --predicate sbom/devbox.spdx.json \
             --type spdxjson \
             "${{ steps.push.outputs.digest }}"

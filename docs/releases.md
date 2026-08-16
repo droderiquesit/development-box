@@ -116,18 +116,36 @@ git tag v1.2.0 && git push origin v1.2.0
 publishes the ladder, signs by digest, attaches the SPDX SBOM as a signed
 attestation, and writes release notes carrying both digests.
 
+**The image signature is fully transparency-log-anchored; the SBOM
+attestation is not.** Rekor's public instance rejects the SBOM attestation
+once its embedded predicate — the full SPDX SBOM, multi-MB for an image this
+size — makes the log entry too large
+([sigstore/cosign#3599](https://github.com/sigstore/cosign/issues/3599), still
+open upstream). The attestation is signed with `--tlog-upload=false`: it is
+still Fulcio-signed and bound to the release workflow's OIDC identity, but
+that binding cannot be re-proven once the ephemeral signing certificate
+expires (~10 minutes after signing), because there is no permanent Rekor
+entry to anchor it. The image signature itself is unaffected and stays
+durably verifiable indefinitely. Revisit this once the upstream issue is
+fixed.
+
 ## Verifying what you pulled
 
 ```bash
-# Signature — keyless, bound to the workflow's OIDC identity.
+# Signature — keyless, bound to the workflow's OIDC identity. Durably
+# verifiable indefinitely: this is Rekor-anchored.
 cosign verify ghcr.io/<owner>/development-box:1.2.0 \
   --certificate-identity-regexp 'https://github.com/<owner>/development-box/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-# SBOM attestation.
+# SBOM attestation — signed but not Rekor-anchored (see above), so this needs
+# --insecure-ignore-tlog. It still proves the SBOM was signed by this
+# workflow's OIDC identity at build time; it just can't independently prove
+# *when*, the way the image signature above can.
 cosign verify-attestation ghcr.io/<owner>/development-box:1.2.0 --type spdxjson \
   --certificate-identity-regexp 'https://github.com/<owner>/development-box/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --insecure-ignore-tlog
 
 # What base is this actually built on?
 podman image inspect ghcr.io/<owner>/development-box:1.2.0 \

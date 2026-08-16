@@ -207,7 +207,26 @@ jobs:
           }
           # By digest — a signature over a movable tag certifies nothing.
           retry cosign sign --yes "${{ steps.publish.outputs.digest }}"
-          retry cosign attest --yes \
+
+          # The retry above fixed a real but occasional Rekor blip on `sign`.
+          # `attest` failed 8/8 times across two full release attempts (v1.0.0
+          # #3 and #4), every attempt failing within ~1-2s of the same POST —
+          # too fast to be a slow-upload timeout, and it is a known, still-open
+          # upstream limitation: Rekor's public instance rejects the in-toto
+          # attestation once the embedded predicate (our full SPDX SBOM, which
+          # is multi-MB for an image this size) makes the entry too large.
+          # https://github.com/sigstore/cosign/issues/3599
+          #
+          # --tlog-upload=false skips the public transparency-log entry for
+          # THIS attestation only — the image signature above stays fully
+          # Rekor-anchored and durably verifiable. The SBOM attestation is
+          # still Fulcio-signed and bound to this workflow's OIDC identity, but
+          # without a tlog entry that binding cannot be re-proven once the
+          # ephemeral signing certificate expires (~10 minutes), so
+          # `cosign verify-attestation` needs `--insecure-ignore-tlog` — see
+          # docs/releases.md. Revisit once cosign/Rekor#3599 is resolved
+          # upstream.
+          retry cosign attest --yes --tlog-upload=false \
             --predicate "sbom/devbox-${{ steps.v.outputs.version }}.spdx.json" \
             --type spdxjson \
             "${{ steps.publish.outputs.digest }}"
