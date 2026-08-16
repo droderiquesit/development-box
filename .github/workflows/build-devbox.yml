@@ -284,8 +284,24 @@ jobs:
           # Sign the image, then attach the SBOM as a signed attestation. The
           # attestation is what makes the SBOM trustworthy rather than merely
           # present.
-          cosign sign --yes "${{ steps.push.outputs.digest }}"
-          cosign attest --yes \
+          #
+          # Sigstore's public Rekor instance is a shared, rate-limited service;
+          # cosign retries a single POST internally but can still give up on a
+          # plain transient blip. Wrap the call in an outer retry too — signing
+          # the same digest twice is harmless (it just adds another
+          # transparency-log entry), so retrying from the top is safe.
+          retry() {
+            local attempt=1 max=4 delay=15
+            until "$@"; do
+              [ "$attempt" -ge "$max" ] && return 1
+              echo "::warning::attempt ${attempt}/${max} failed — retrying in ${delay}s: $*"
+              sleep "$delay"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
+          retry cosign sign --yes "${{ steps.push.outputs.digest }}"
+          retry cosign attest --yes \
             --predicate sbom/devbox.spdx.json \
             --type spdxjson \
             "${{ steps.push.outputs.digest }}"
