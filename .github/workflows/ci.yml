@@ -164,9 +164,23 @@ jobs:
         # scan ever happened, so it failed a second time on the missing file and
         # buried the real error. Upload only if there is something to upload.
         if: always() && hashFiles('trivy-config.sarif') != ''
+        # Code scanning may not be enabled — it is a paid feature on private
+        # repositories. Trivy still ran and the SARIF still exists; there is
+        # simply nowhere to put it. Failing the whole security job over a
+        # missing *destination* would train people to ignore this job, so the
+        # upload is best-effort and the SARIF is kept as an artifact below.
+        continue-on-error: true
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
+
+      - name: keep the SARIF regardless
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && hashFiles('trivy-config.sarif') != ''
+        with:
+          name: trivy-config-sarif
+          path: trivy-config.sarif
+          retention-days: 30
 
   docs:
     name: markdown

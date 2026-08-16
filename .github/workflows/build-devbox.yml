@@ -206,9 +206,23 @@ jobs:
         # Only upload if a scan actually produced a file; `always()` on its own
         # turns one failure into two and buries the real error.
         if: always() && hashFiles('trivy-image.sarif') != ''
+        # Code scanning may not be enabled — it is a paid feature on private
+        # repositories. Trivy still ran and the SARIF is still produced; there
+        # is simply nowhere to put it. Failing the whole security job over a
+        # missing *destination* would train people to ignore this job, so the
+        # upload is best-effort and the SARIF is always kept as an artifact.
+        continue-on-error: true
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image
+
+      - name: keep the SARIF regardless
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && hashFiles('trivy-image.sarif') != ''
+        with:
+          name: trivy-image-sarif
+          path: trivy-image.sarif
+          retention-days: 30
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

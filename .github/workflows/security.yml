@@ -59,9 +59,23 @@ jobs:
 
       - uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
         if: hashFiles('trivy.sarif') != ''
+        # Code scanning may not be enabled — it is a paid feature on private
+        # repositories. Trivy still ran and the SARIF is still produced; there
+        # is simply nowhere to put it. Failing the whole security job over a
+        # missing *destination* would train people to ignore this job, so the
+        # upload is best-effort and the SARIF is always kept as an artifact.
+        continue-on-error: true
         with:
           sarif_file: trivy.sarif
           category: trivy-${{ strategy.job-index }}
+
+      - name: keep the SARIF regardless
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && hashFiles('trivy.sarif') != ''
+        with:
+          name: trivy-sarif-${{ strategy.job-index }}
+          path: trivy.sarif
+          retention-days: 30
 
   repository:
     name: repository scan
