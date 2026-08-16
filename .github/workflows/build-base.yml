@@ -179,10 +179,19 @@ jobs:
             github.com/anchore/grype/cmd/grype@v0.117.0
             github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
 
+      - name: enable the podman API socket
+        run: |
+          # syft and trivy read images through the podman API, not the
+          # containers-storage files directly — rootless storage layouts are
+          # version-coupled and syft's containers-storage parsing failed on the
+          # runner. The socket is the supported interface.
+          systemctl --user enable --now podman.socket
+          podman info --format '{{.Host.RemoteSocket.Path}}' || true
+
       - name: SBOM
         run: |
           syft scan \
-            "containers-storage:localhost/base:${{ steps.meta.outputs.sha }}" \
+            "podman:localhost/base:${{ steps.meta.outputs.sha }}" \
             -o spdx-json=base.spdx.json -o cyclonedx-json=base.cdx.json
 
       - name: vulnerability scan
