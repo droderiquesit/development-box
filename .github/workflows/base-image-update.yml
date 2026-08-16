@@ -13,15 +13,20 @@
 # Three ways in, one code path:
 #
 #   1. repository_dispatch `base-image-published` — the factory tells us the
-#      moment it publishes. This is the fast path: minutes, not a day.
+#      moment it publishes, IF it holds a cross-repo credential. That token is
+#      optional on the factory side; treat this as a latency optimization,
+#      never as something to depend on for correctness.
 #   2. workflow_dispatch — manual recovery. Give base_version (+ optionally
 #      base_digest) to adopt a SPECIFIC release, including an older one for a
 #      rollback; leave both empty to reconcile against the newest published
 #      release right now.
-#   3. schedule, daily — reconciliation. Dispatch events are best-effort
-#      (a webhook outage, a token hiccup, a repo rename) and nothing notices
-#      a missed one. The reconciler asks the registry what the newest release
-#      is and converges on it, so a lost event costs at most a day.
+#   3. schedule — reconciliation, and the PRIMARY mechanism this chain relies
+#      on. It needs no cross-repo secret at all: skopeo lists tags on a
+#      registry package this repo already has read access to (the GHCR grant
+#      from setup) and resolves the newest one — a plain, credential-light
+#      poll. Every few hours because it is genuinely the main path, not just
+#      a rare-outage backstop; a lost/never-sent dispatch costs at most one
+#      interval, not a day.
 #
 # Whatever the trigger, NOTHING is adopted on the sender's say-so. A dispatch
 # payload is data from another repository, not truth: before the pin moves,
@@ -56,9 +61,12 @@ name: base-image-update
         required: false
         default: ''
   schedule:
-    # Daily reconciliation, 30 minutes after build-devbox's Monday slot so the
-    # two never contend for the same fresh pin.
-    - cron: '30 6 * * *'
+    # Every 4 hours: this is the PRIMARY adoption path (see the file header),
+    # not just a rare-outage backstop, so it runs often enough that "no
+    # cross-repo token configured" still means same-morning adoption rather
+    # than a next-Monday one. A no-op run (pin already current) costs one
+    # cheap registry poll — safe to run this often.
+    - cron: '15 */4 * * *'
 
 # contents: write — the pin commit lands on main. actions: write — this
 # workflow dispatches build-devbox.yml in the same repository afterwards.

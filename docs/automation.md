@@ -1,13 +1,19 @@
 # The automated rebuild chain — DevBox side
 
 The Base Image Factory ([`droderiquesit/ai-devbox`](https://github.com/droderiquesit/ai-devbox))
-publishes a release; some minutes later a freshly built, fully tested, signed
-DevBox sits in the registry on top of it — with no human in the loop and no
-step of the existing pipeline skipped. This page explains the machinery on
-**this** side of that chain: what fires, what is verified, what is committed,
-and what to do when any of it misbehaves. The factory's half lives in its own
-repository; the release contract between the two is a `repository_dispatch`
-event plus a signed digest in the registry.
+publishes a release; within a few hours at most (often seconds) a freshly
+built, fully tested, signed DevBox sits in the registry on top of it — with no
+human in the loop and no step of the existing pipeline skipped. This page
+explains the machinery on **this** side of that chain: what fires, what is
+verified, what is committed, and what to do when any of it misbehaves.
+
+**No cross-repo credential is required for correctness.** The reconciler
+below polls the factory's registry package directly — this repo's own
+`GITHUB_TOKEN` already has read access to it (the one-time GHCR grant made
+during setup) — and adopts a new release on its own. A `repository_dispatch`
+from the factory is accepted too, purely as a latency shortcut, IF the
+factory happens to hold a PAT for it; nothing here depends on that PAT
+existing.
 
 The design constraint everything below serves: **the pin in `versions.yaml`
 stays the single source of truth, and a human-quality audit trail survives the
@@ -58,24 +64,29 @@ Step by step:
    exact base they were built on. Cutting a versioned release remains a
    deliberate human act via `release.yml`, exactly as before.
 
-## The daily reconciler
+## The reconciler — the primary mechanism, not a backstop
 
-Dispatch events are best-effort. A webhook outage, an expired factory-side
-token, a repository rename — nothing *notices* a missed event, which is what
-makes missed events dangerous. So the same workflow also runs on a daily
-schedule (`30 6 * * *` UTC): it lists the base repository's tags, picks the
-highest `X.Y.Z`, resolves its digest, and walks the identical
-verify-adopt-build path. Three properties make this safe to run forever:
+The factory's dispatch is optional and may never fire (no PAT configured
+there is the expected default, not a failure). So this same workflow also
+runs on a schedule, **every 4 hours** (`15 */4 * * *` UTC): it lists the base
+repository's tags, picks the highest `X.Y.Z`, resolves its digest, and walks
+the identical verify-adopt-build path used for a dispatch. This is the
+guaranteed path a new base image reaches this repository by — the dispatch,
+when present, only shortens the wait.
+
+Three properties make this safe to run forever:
 
 * **Idempotent** — pin already current means a `::notice::` and a green exit;
-  no commit, no build, no churn.
+  no commit, no build, no churn. Running it every 4 hours costs one cheap
+  registry poll per run when nothing changed.
 * **Monotonic** — the reconciler (and the dispatch path) refuse to move the
   pin to a *lower* version. A stale or replayed event for 1.0.1 arriving
   after 1.0.2 was adopted cannot quietly downgrade anything. Only a manual
   `workflow_dispatch` naming an explicit version may go backwards, because a
   rollback is a decision, not a race outcome.
-* **Convergent** — whatever was missed, the fleet is at most one day behind
-  the newest published base.
+* **Convergent** — whatever was missed (or never sent), the fleet is at most
+  one interval — a few hours — behind the newest published base, with or
+  without the factory ever holding a dispatch credential.
 
 Renovate's base-image custom manager (see `renovate.json`) stays configured
 as the *tertiary* net behind these two: if both the dispatch and the
