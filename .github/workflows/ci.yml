@@ -150,21 +150,13 @@ jobs:
           # leak — including the same secret in a new commit — still fails here.
           gitleaks git . --redact --verbose
 
+      - uses: ./.github/actions/trivy
+
       - name: trivy config (IaC + Containerfiles)
-        id: trivy
-        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
-        env:
-          # aquasecurity/setup-trivy resolves the release tag through the GitHub
-          # API. Unauthenticated, that call is rate-limited per runner IP and
-          # fails the install with a bare "exit code 1" that says nothing about
-          # rate limits. The token makes it an authenticated call.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          scan-type: config
-          scan-ref: .
-          format: sarif
-          output: trivy-config.sarif
-          exit-code: '0'
+        run: |
+          # exit-code 0: findings are reported through the SARIF upload and the
+          # Security tab, not by failing every unrelated pull request.
+          trivy config . --format sarif --output trivy-config.sarif --exit-code 0
 
       - name: upload SARIF
         uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4

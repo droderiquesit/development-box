@@ -48,21 +48,13 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      - uses: ./.github/actions/trivy
+
       - name: trivy
-        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
-        env:
-          # aquasecurity/setup-trivy resolves the release tag through the GitHub
-          # API. Unauthenticated, that call is rate-limited per runner IP and
-          # fails the install with a bare "exit code 1" that says nothing about
-          # rate limits. The token makes it an authenticated call.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          image-ref: ${{ matrix.image }}
-          format: sarif
-          output: trivy.sarif
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: '0'
+        run: |
+          trivy image "${{ matrix.image }}" \
+            --format sarif --output trivy.sarif \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
         continue-on-error: true      # the image may not be published yet
 
       - uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4

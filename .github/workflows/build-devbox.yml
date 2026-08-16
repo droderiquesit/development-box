@@ -190,21 +190,17 @@ jobs:
             -o cyclonedx-json=sbom/devbox.cdx.json
           echo "packages: $(jq '.packages | length' sbom/devbox.spdx.json)"
 
+      - uses: ./.github/actions/trivy
+
       - name: vulnerability scan (SARIF)
-        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
-        env:
-          # aquasecurity/setup-trivy resolves the release tag through the GitHub
-          # API. Unauthenticated, that call is rate-limited per runner IP and
-          # fails the install with a bare "exit code 1" that says nothing about
-          # rate limits. The token makes it an authenticated call.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          image-ref: localhost/devbox:${{ steps.meta.outputs.sha }}
-          format: sarif
-          output: trivy-image.sarif
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: '0'
+        run: |
+          # The image is in podman's local store, not a registry, so point Trivy
+          # at the containers-storage transport rather than a pullable name.
+          trivy image \
+            --image-src containerd,podman \
+            "localhost/devbox:${{ steps.meta.outputs.sha }}" \
+            --format sarif --output trivy-image.sarif \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
 
       - uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
         # Only upload if a scan actually produced a file; `always()` on its own
