@@ -309,10 +309,16 @@ doctor_mcp() {
 doctor_environment() {
   [ "$(id -u)" -ne 0 ] && note_ok "non-root" "uid $(id -u)" || note_fail "non-root" "running as root"
   [ -w "$DEVBOX_WORKSPACE" ] && note_ok "workspace" "writable" || note_fail "workspace" "not writable"
-  if [ -d "$TF_PLUGIN_CACHE_DIR" ] || mkdir -p "$TF_PLUGIN_CACHE_DIR" 2>/dev/null; then
-    note_ok "tf plugin cache" "$TF_PLUGIN_CACHE_DIR"
+  # TF_PLUGIN_CACHE_DIR is exported by the shell profile (00-env.sh), which a
+  # login shell sources and the container HEALTHCHECK does not. Under `set -u`
+  # the bare reference aborted doctor in exactly one context — the healthcheck —
+  # so the container ran fine and still reported unhealthy. Default to the same
+  # path the profile sets rather than skipping the check.
+  local tf_cache="${TF_PLUGIN_CACHE_DIR:-$HOME/.cache/terraform/plugins}"
+  if [ -d "$tf_cache" ] || mkdir -p "$tf_cache" 2>/dev/null; then
+    note_ok "tf plugin cache" "$tf_cache"
   else
-    note_warn "tf plugin cache" "cannot create $TF_PLUGIN_CACHE_DIR"
+    note_warn "tf plugin cache" "cannot create $tf_cache"
   fi
   # Persistence: these should be volumes, not container-local directories.
   local mp

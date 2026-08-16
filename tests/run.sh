@@ -188,6 +188,11 @@ run "devbox info"        'devbox info | head -3'
 run "devbox versions"    'devbox versions | head -3'
 run "devbox status"      'devbox status | head -3'
 run "devbox doctor"      'devbox doctor --core-only >/dev/null && echo healthy'
+# The HEALTHCHECK runs doctor WITHOUT a login shell, so nothing from
+# /etc/devbox/shell.d is exported. Everything else in this suite goes through
+# `bash -lc`, which is exactly how a `set -u` crash on a profile-only variable
+# passed 152 tests and still marked the running container unhealthy.
+run "doctor (healthcheck env)" 'env -u TF_PLUGIN_CACHE_DIR -u TOFU_PLUGIN_CACHE_DIR bash -c "/opt/devbox/bin/devbox doctor --quiet --core-only" >/dev/null 2>&1; rc=$?; [ $rc -le 1 ] && echo "no crash (rc=$rc)"'
 run "devbox doctor json" 'devbox doctor --json | jq -r .status'
 run "ai models"          'ai models | head -3'
 run "ai providers"       'ai providers | head -3'
