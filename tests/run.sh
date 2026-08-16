@@ -2,7 +2,8 @@
 # -----------------------------------------------------------------------------
 # DevBox image test suite.
 #
-#   ENGINE=podman IMAGE=ai-devbox:latest BASE_IMAGE=ai-devbox-base:latest tests/run.sh
+#   ENGINE=podman IMAGE=ai-devbox:latest \
+#     BASE_IMAGE=ghcr.io/droderiquesit/ai-devbox/ai-engineering:1.0.0 tests/run.sh
 #
 # Tests the CONTRACT of the image, not its implementation:
 #   * every tool the docs promise is present and runnable
@@ -17,7 +18,9 @@ set -uo pipefail
 
 ENGINE="${ENGINE:-podman}"
 IMAGE="${IMAGE:-ai-devbox:latest}"
-BASE_IMAGE="${BASE_IMAGE:-ai-devbox-base:latest}"
+# The base is the pinned Base Image Factory release; resolve the default from
+# versions.yaml so this suite and CI cannot disagree about which base is meant.
+BASE_IMAGE="${BASE_IMAGE:-$("$(dirname "$0")/../.github/scripts/image-ref.sh" base 2>/dev/null || echo "")}"
 ONLY="${1:-}"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -388,7 +391,7 @@ fi
 # =============================================================================
 if section_wanted base; then
 sect "Base image contract"
-if "$ENGINE" image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+if [ -n "$BASE_IMAGE" ] && "$ENGINE" image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
   b() {
     local desc="$1" cmd="$2" out
     if out="$("$ENGINE" run --rm "$BASE_IMAGE" bash -lc "$cmd" 2>&1)"; then

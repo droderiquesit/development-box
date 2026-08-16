@@ -1,19 +1,23 @@
 # Releases and base patching
 
-Two images, two version streams, two tag prefixes. The separation exists so
-that patching the operating system underneath the DevBox is a small, reviewable,
-testable, revertable change — rather than a rebuild of everything and a hope.
+Two images, two version streams — and since the repository split, **two
+repositories**. The base image is owned end-to-end by the Base Image Factory
+([`droderiquesit/ai-devbox`](https://github.com/droderiquesit/ai-devbox));
+this repository owns only the DevBox. The separation exists so that patching
+the operating system underneath the DevBox is a small, reviewable, testable,
+revertable change — rather than a rebuild of everything and a hope.
 
 ## The two streams
 
-| | Base image | DevBox image |
+| | Base image (external) | DevBox image (this repo) |
 |---|---|---|
 | Contents | Ubuntu 24.04 LTS, non-root `dev` user, Go / Node / Python + uv, shell | Terraform, Kubernetes, cloud, security and AI tooling |
 | Changes when | an OS security patch, a language runtime bump | a tool version bump, a policy change, a new prompt |
 | Cadence | monthly, plus out-of-band for CVEs | weekly |
-| Version pin | `release.base` in `versions.yaml` | `release.devbox` in `versions.yaml` |
-| Release tag | `base-v1.0.1` | `v1.2.0` |
-| Registry | `ghcr.io/<owner>/development-box-base` | `ghcr.io/<owner>/development-box` |
+| Owned by | Base Image Factory (`droderiquesit/ai-devbox`) | this repository |
+| Version pin | `base.version` (+ `base.digest`) in `versions.yaml` | `release.devbox` in `versions.yaml` |
+| Release | `ai-engineering-v1.0.1` tag or `release_version` dispatch, in the factory | `v1.2.0` tag or `release.yml` dispatch, here |
+| Registry | `ghcr.io/droderiquesit/ai-devbox/ai-engineering` | `ghcr.io/<owner>/development-box` |
 
 The DevBox **pulls** the base. It never rebuilds it — not in CI, not in
 `make build`, not in `compose up`. That single constraint is what the rest of
@@ -21,13 +25,13 @@ this page rests on.
 
 ```mermaid
 flowchart LR
-  subgraph BASE["base stream — release.base"]
-    B1["Containerfile.base"] --> B2["build-base.yml"]
-    B2 --> B3["ghcr.io/…-base<br/>1.0.1 · 1.0 · 1 · latest"]
+  subgraph BASE["Base Image Factory repo — ai-engineering"]
+    B1["images/ai-engineering/"] --> B2["build.yml"]
+    B2 --> B3["ghcr.io/droderiquesit/ai-devbox/ai-engineering<br/>1.0.1 · 1.0 · 1 · latest"]
   end
 
-  subgraph PIN["the gate"]
-    P1["versions.yaml<br/><b>release.base: 1.0.1</b>"]
+  subgraph PIN["the gate (this repo)"]
+    P1["versions.yaml<br/><b>base.version + base.digest</b>"]
   end
 
   subgraph DEV["devbox stream — release.devbox"]
@@ -47,14 +51,19 @@ flowchart LR
 An OS CVE lands. The whole flow:
 
 ```bash
-# 1. Publish a patched base. The weekly schedule already rebuilt it as :edge;
-#    tagging is what turns a rebuild into a release.
-git tag base-v1.0.1 && git push origin base-v1.0.1
-#    -> build-base.yml publishes 1.0.1, 1.0, 1, latest (amd64 + arm64),
-#       signs by digest, and cuts a GitHub release.
+# 1. Publish a patched base — IN THE FACTORY REPOSITORY. Its weekly schedule
+#    already rebuilt and scanned it; a release is a deliberate tag (or the
+#    release_version dispatch, which is the same thing for environments whose
+#    credentials cannot push tags):
+#      (in droderiquesit/ai-devbox)
+git tag ai-engineering-v1.0.1 && git push origin ai-engineering-v1.0.1
+#    -> its build.yml publishes 1.0.1, 1.0, 1, latest, signs by digest,
+#       and cuts a GitHub release.
 
-# 2. Adopt it — one line, in a pull request.
-#    versions.yaml:  release.base: "1.0.0"  ->  "1.0.1"
+# 2. Adopt it here — two lines, in a pull request (Renovate opens it for you:
+#    see renovate.json's base-image custom manager).
+#    versions.yaml:  base.version: "1.0.0" -> "1.0.1"
+#                    base.digest:  sha256:… -> the new release's digest
 
 # 3. CI does the rest. build-devbox pulls base 1.0.1, rebuilds the DevBox on
 #    it and runs all 152 image tests. If the patch broke something, the PR is
@@ -154,11 +163,11 @@ podman image inspect ghcr.io/<owner>/development-box:1.2.0 \
 
 ## Build caching
 
-Both build workflows push and pull an OCI layer cache in GHCR, beside the image
-it caches:
+The DevBox build workflows push and pull an OCI layer cache in GHCR, beside
+the image it caches (the factory repository runs its own, equivalent cache
+for the base):
 
 ```text
-ghcr.io/<owner>/development-box-base/buildcache
 ghcr.io/<owner>/development-box/buildcache
 ```
 

@@ -107,12 +107,19 @@ flowchart TB
 
 ## The decisions that shaped this
 
-### 1. Two images, not one
+### 1. Two images, not one — and now two repositories
+
+The base image is owned by the **Base Image Factory** repository
+([`droderiquesit/ai-devbox`](https://github.com/droderiquesit/ai-devbox)),
+which builds, tests, scans, signs and versions it independently. This
+repository consumes a published release of it — pinned by repo + version +
+digest in `versions.yaml`'s `base:` section — the same way any other
+project could. See `docs/decisions.md` for the ADR cross-reference.
 
 ```mermaid
 flowchart LR
     UB["ubuntu:24.04<br/>(digest-pinned)"] --> BASE
-    subgraph BASE["ai-devbox-base — changes monthly"]
+    subgraph BASE["ai-engineering base — Base Image Factory repo, changes monthly"]
         B1["OS packages"]
         B2["non-root dev user"]
         B3["Go · Node · Python + uv"]
@@ -284,8 +291,8 @@ unbuildable on a laptop and would couple "I need a newer Terraform" to
 
 ```text
 development-box/
-├── Containerfile.base          base image: OS, user, language runtimes
-├── Containerfile               devbox image: everything else
+├── Containerfile               the DevBox image, FROM the published
+│                               Base Image Factory release (external)
 ├── compose.yaml                devbox + optional router + optional local model
 ├── versions.yaml               ← the single source of truth for every version
 ├── Makefile / Taskfile.yml     build, test, scan, sign

@@ -9,7 +9,11 @@ version: '3'
 vars:
   ENGINE: '{{.ENGINE | default "podman"}}'
   TAG: '{{.TAG | default "latest"}}'
-  BASE_REF: '{{.BASE_IMAGE | default "ai-devbox-base"}}:{{.TAG | default "latest"}}'
+  # The base is the published Base Image Factory release pinned in
+  # versions.yaml's `base:` section — same source of truth as the Makefile
+  # and CI, so none of them can drift apart.
+  BASE_REF:
+    sh: .github/scripts/image-ref.sh base
   DEVBOX_REF: '{{.DEVBOX_IMAGE | default "ai-devbox"}}:{{.TAG | default "latest"}}'
   VCS_REF:
     sh: git rev-parse --short HEAD 2>/dev/null || echo unknown
@@ -23,19 +27,16 @@ tasks:
     silent: true
 
   build:
-    desc: Build both images
-    cmds: [{task: build-base}, {task: build-devbox}]
+    desc: Build the DevBox on the pinned, published base (same rule as CI)
+    cmds: [{task: pull-base}, {task: build-devbox}]
 
-  build-base:
-    desc: Build the base image (OS + language runtimes)
+  pull-base:
+    desc: Pull the pinned Base Image Factory release (the base is never built here)
     cmds:
-      - '{{.ENGINE}} build -f Containerfile.base -t {{.BASE_REF}}
-         --build-arg VCS_REF={{.VCS_REF}} --build-arg BUILD_DATE={{.BUILD_DATE}} .'
-    sources: [Containerfile.base, versions.yaml, 'scripts/install/1*.sh', 'scripts/install/2*.sh', 'config/shell/**', 'scripts/lib/**']
+      - '{{.ENGINE}} pull {{.BASE_REF}}'
 
   build-devbox:
     desc: Build the DevBox image
-    deps: [build-base]
     cmds:
       - '{{.ENGINE}} build -f Containerfile -t {{.DEVBOX_REF}}
          --build-arg BASE_IMAGE_REF={{.BASE_REF}}

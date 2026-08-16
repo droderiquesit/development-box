@@ -18,51 +18,39 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Release versions
+# Release version
 # -----------------------------------------------------------------------------
-# Two INDEPENDENT streams. That independence is the whole point: the base image
-# moves on OS-security time, the DevBox moves on tooling time, and neither
-# should be able to drag the other along.
-#
-#   base    the published BASE image release the DevBox is built FROM. It is a
-#           registry artefact, pulled — never rebuilt as a side effect of a
-#           DevBox build. Bumping this one line IS the base patching mechanism:
-#           a reviewable commit, a revertable commit, and one that re-runs the
-#           full DevBox test suite against the new base before anything ships.
-#
 #   devbox  the version of the DevBox image this repository produces.
-#
-# Cutting a release is a git tag, and the tag prefix picks the stream:
-#   base-v1.0.1   -> publishes the base image at 1.0.1
-#   v1.0.0        -> publishes the DevBox image at 1.0.0
+#           Cutting a release is a `v<semver>` git tag (or the release.yml
+#           dispatch input) at a commit where this value matches.
 release:
-  base: "1.0.0"
   devbox: "1.0.0"
 
 metadata:
   schema: 1
-  base_image: docker.io/library/ubuntu
-  base_tag: "24.04"
-  # Pin the base image by digest for reproducible builds. Renovate keeps it
-  # aligned with base_tag. Set BASE_DIGEST="" at build time to opt out.
-  base_digest: "sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea"
 
 # -----------------------------------------------------------------------------
-# Language runtimes (baked into the BASE image — slow moving)
+# The base image — an EXTERNAL dependency, owned by the Base Image Factory
 # -----------------------------------------------------------------------------
-languages:
-  # Go: exact tarball from go.dev, checksum-verified.
-  # renovate: datasource=golang-version depName=go
-  go: "1.26.6"
-  # Node.js: current LTS line via NodeSource signed apt repo.
-  # renovate: datasource=node-version depName=node
-  node_major: "24"
-  # Python: Ubuntu 24.04 LTS ships 3.12 as the system interpreter. We do NOT
-  # replace it; uv manages per-project interpreters when a project needs another.
-  python: "3.12"
-  # uv drives all Python tool installs; pinned exactly.
-  # renovate: datasource=pypi depName=uv
-  uv: "0.12.5"
+# The DevBox builds FROM a published release of the factory's ai-engineering
+# image (repo: droderiquesit/ai-devbox — see its docs/image-contract.md for
+# exactly what the base does and does not provide). It is a registry artefact,
+# pulled — never rebuilt as a side effect of a DevBox build.
+#
+# Bumping `version` (+ `digest`) here IS the base patching mechanism: one
+# reviewable, revertable commit, gated by this repository's full test suite
+# against the new base before anything ships. Renovate keeps the digest in
+# step with the version and opens the PR when the factory publishes a new
+# release (see renovate.json).
+#
+# What used to live here — the Ubuntu tag/digest and the Go/Node/Python/uv
+# runtime pins — moved with the base's lifecycle to the factory repository
+# (images/ai-engineering/versions.yaml there). See docs/decisions.md.
+base:
+  repo: ghcr.io/droderiquesit/ai-devbox/ai-engineering
+  # renovate: the custom manager in renovate.json tracks version+digest as one
+  version: "1.0.0"
+  digest: "sha256:fb253925e8a5f069e1a745ec3422d9ddfb892981bc44fe535dae9a09baa76a59"
 
 # -----------------------------------------------------------------------------
 # Infrastructure as Code
