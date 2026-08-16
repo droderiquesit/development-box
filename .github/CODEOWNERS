@@ -1,0 +1,18 @@
+# CODEOWNERS - Automatic Code Review Assignment
+# This file defines who must review changes to specific areas of the codebase
+
+# Global code owners (require review for all changes)
+* @droderiquesit
+
+# Repository configuration and security
+.github/ @droderiquesit
+.gitignore @droderiquesit
+SECURITY.md @droderiquesit
+README.md @droderiquesit
+
+# Source code
+src/ @droderiquesit
+
+# Documentation
+docs/ @droderiquesit
+*.md @droderiquesit
