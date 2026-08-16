@@ -142,8 +142,15 @@ jobs:
       # looks slow rather than misconfigured.
       - name: log in to the registry
         run: |
+          # Both keychains, deliberately: podman writes containers/auth.json,
+          # which podman and skopeo read — but cosign uses go-containerregistry,
+          # which reads the DOCKER keychain (~/.docker/config.json). With only
+          # podman login, the push succeeds and the signing step then fails
+          # UNAUTHORIZED on the very image that was just pushed.
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
 
       - name: build
         env:
@@ -257,7 +264,10 @@ jobs:
           set -euo pipefail
           sha="$(git rev-parse --short HEAD)"
           dest="$(.github/scripts/image-ref.sh base-repo)"
+          # Dual login — see the build job's login step for why cosign needs
+          # the docker keychain while podman/skopeo use containers/auth.json.
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
 
           podman manifest create localhost/base-manifest
           # One arch today — see the matrix comment in the build job. The loop
