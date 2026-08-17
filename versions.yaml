@@ -24,7 +24,7 @@
 #           Cutting a release is a `v<semver>` git tag (or the release.yml
 #           dispatch input) at a commit where this value matches.
 release:
-  devbox: "1.0.0"
+  devbox: "1.0.1"
 
 metadata:
   schema: 1
