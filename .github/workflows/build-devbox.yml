@@ -224,9 +224,21 @@ jobs:
         run: |
           # The image is in podman's local store, not a registry — read it
           # through the podman API socket enabled above.
+          #
+          # --timeout: this image carries large vendored header caches (e.g.
+          # node-gyp's bundled OpenSSL headers) — tens of thousands of small
+          # files in one layer. Trivy's 5-minute default budget is a context
+          # deadline shared across its filesystem walker's worker pool, and a
+          # layer like that can blow through it on a runner under load
+          # ("semaphore acquire: context deadline exceeded" — see
+          # https://trivy.dev/docs/v0.69/guide/references/troubleshooting#timeout).
+          # This is a scanner timeout, not reduced coverage: raising the
+          # budget lets the SAME full scan finish, rather than skipping or
+          # excluding anything.
           trivy image \
             --image-src podman \
             "localhost/devbox:${{ steps.meta.outputs.sha }}" \
+            --timeout 20m \
             --format sarif --output trivy-image.sarif \
             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
 
