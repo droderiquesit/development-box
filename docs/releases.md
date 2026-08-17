@@ -2,7 +2,7 @@
 
 Two images, two version streams — and since the repository split, **two
 repositories**. The base image is owned end-to-end by the Base Image Factory
-([`droderiquesit/ai-devbox`](https://github.com/droderiquesit/ai-devbox));
+([`droderiquesit/base-image-factory`](https://github.com/droderiquesit/base-image-factory));
 this repository owns only the DevBox. The separation exists so that patching
 the operating system underneath the DevBox is a small, reviewable, testable,
 revertable change — rather than a rebuild of everything and a hope.
@@ -14,10 +14,10 @@ revertable change — rather than a rebuild of everything and a hope.
 | Contents | Ubuntu 24.04 LTS, non-root `dev` user, Go / Node / Python + uv, shell | Terraform, Kubernetes, cloud, security and AI tooling |
 | Changes when | an OS security patch, a language runtime bump | a tool version bump, a policy change, a new prompt |
 | Cadence | monthly, plus out-of-band for CVEs | weekly |
-| Owned by | Base Image Factory (`droderiquesit/ai-devbox`) | this repository |
+| Owned by | Base Image Factory (`droderiquesit/base-image-factory`) | this repository |
 | Version pin | `base.version` (+ `base.digest`) in `versions.yaml` | `release.devbox` in `versions.yaml` |
 | Release | `ai-engineering-v1.0.1` tag or `release_version` dispatch, in the factory | `v1.2.0` tag or `release.yml` dispatch, here |
-| Registry | `ghcr.io/droderiquesit/ai-devbox/ai-engineering` | `ghcr.io/<owner>/development-box` |
+| Registry | `ghcr.io/droderiquesit/base-image-factory/ai-engineering` | `ghcr.io/<owner>/development-box` |
 
 The DevBox **pulls** the base. It never rebuilds it — not in CI, not in
 `make build`, not in `compose up`. That single constraint is what the rest of
@@ -27,7 +27,7 @@ this page rests on.
 flowchart LR
   subgraph BASE["Base Image Factory repo — ai-engineering"]
     B1["images/ai-engineering/"] --> B2["build.yml"]
-    B2 --> B3["ghcr.io/droderiquesit/ai-devbox/ai-engineering<br/>1.0.1 · 1.0 · 1 · latest"]
+    B2 --> B3["ghcr.io/droderiquesit/base-image-factory/ai-engineering<br/>1.0.1 · 1.0 · 1 · latest"]
   end
 
   subgraph PIN["the gate (this repo)"]
@@ -55,7 +55,7 @@ An OS CVE lands. The whole flow:
 #    already rebuilt and scanned it; a release is a deliberate tag (or the
 #    release_version dispatch, which is the same thing for environments whose
 #    credentials cannot push tags):
-#      (in droderiquesit/ai-devbox)
+#      (in droderiquesit/base-image-factory)
 git tag ai-engineering-v1.0.1 && git push origin ai-engineering-v1.0.1
 #    -> its build.yml publishes 1.0.1, 1.0, 1, latest, signs by digest,
 #       and cuts a GitHub release.

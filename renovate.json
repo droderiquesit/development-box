@@ -95,9 +95,9 @@
       "labels": ["dependencies", "kubernetes"]
     },
     {
-      "description": "Base-image bumps are reviewed individually and labelled — this is the DevBox's foundation changing, and the PR's CI run against the new base is the acceptance gate.",
+      "description": "Base-image bumps are reviewed individually and labelled — this is the DevBox's foundation changing, and the PR's CI run against the new base is the acceptance gate. Renovate is now the TERTIARY safety net for this pin, behind (1) the factory's repository_dispatch into base-image-update.yml and (2) that workflow's daily reconciliation run — it stays because a net that costs one weekly PR is cheap insurance against both of those failing at once.",
       "matchFileNames": ["versions.yaml"],
-      "matchPackageNames": ["ghcr.io/droderiquesit/ai-devbox/**"],
+      "matchPackageNames": ["ghcr.io/droderiquesit/base-image-factory/**"],
       "groupName": null,
       "labels": ["dependencies", "base-image"],
       "automerge": false

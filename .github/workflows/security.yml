@@ -44,7 +44,7 @@ jobs:
       matrix:
         image:
           # Only the DevBox image — the base is scanned weekly by its own
-          # repository (the Base Image Factory, droderiquesit/ai-devbox).
+          # repository (the Base Image Factory, droderiquesit/base-image-factory).
           - ghcr.io/${{ github.repository }}:latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

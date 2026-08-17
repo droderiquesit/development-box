@@ -4,7 +4,7 @@
 # =============================================================================
 # Triggered by a `v*.*.*` tag. This releases the DEVBOX only; the base image
 # is an external dependency with its own release stream in the Base Image
-# Factory repository (droderiquesit/ai-devbox, `ai-engineering-v*` releases).
+# Factory repository (droderiquesit/base-image-factory, `ai-engineering-v*` releases).
 #
 # This build does NOT build a base image. It pulls the base release pinned in
 # the `base:` section of versions.yaml, exactly as build-devbox does. A
@@ -122,7 +122,7 @@ jobs:
           set -euo pipefail
           base='${{ steps.v.outputs.base }}'
           if ! podman pull "$base"; then
-            echo "::error::pinned base ${base} is not in the registry. Publish it from the Base Image Factory (droderiquesit/ai-devbox, release ai-engineering-v${{ steps.v.outputs.base_version }}) before releasing the DevBox."
+            echo "::error::pinned base ${base} is not in the registry. Publish it from the Base Image Factory (droderiquesit/base-image-factory, release ai-engineering-v${{ steps.v.outputs.base_version }}) before releasing the DevBox."
             exit 1
           fi
           echo "digest=$(podman image inspect --format '{{index .RepoDigests 0}}' "$base")" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,386 @@
+---
+# =============================================================================
+# BASE IMAGE UPDATE — adopt published factory releases automatically.
+# =============================================================================
+# The Base Image Factory (droderiquesit/base-image-factory) publishes a release; this
+# workflow moves the `base:` pin in versions.yaml onto it and kicks off the
+# full DevBox pipeline. It is the automated half of the patching mechanism
+# that docs/releases.md describes as a two-line reviewable commit — the commit
+# is still those two lines, still on main, still one `git revert` from undone;
+# a machine just writes it instead of a person, and only after verifying the
+# artefact it points at.
+#
+# Three ways in, one code path:
+#
+#   1. repository_dispatch `base-image-published` — the factory tells us the
+#      moment it publishes, IF it holds a cross-repo credential. That token is
+#      optional on the factory side; treat this as a latency optimization,
+#      never as something to depend on for correctness.
+#   2. workflow_dispatch — manual recovery. Give base_version (+ optionally
+#      base_digest) to adopt a SPECIFIC release, including an older one for a
+#      rollback; leave both empty to reconcile against the newest published
+#      release right now.
+#   3. schedule — reconciliation, and the PRIMARY mechanism this chain relies
+#      on. It needs no cross-repo secret at all: skopeo lists tags on a
+#      registry package this repo already has read access to (the GHCR grant
+#      from setup) and resolves the newest one — a plain, credential-light
+#      poll. Every few hours because it is genuinely the main path, not just
+#      a rare-outage backstop; a lost/never-sent dispatch costs at most one
+#      interval, not a day.
+#
+# Whatever the trigger, NOTHING is adopted on the sender's say-so. A dispatch
+# payload is data from another repository, not truth: before the pin moves,
+# the digest must exist in the registry AND carry a valid keyless cosign
+# signature from the factory's own Actions identity. A forged or corrupted
+# event dies here, unadopted.
+#
+# The pin commit itself does not publish anything. build-devbox.yml pulls the
+# new base, rebuilds, and runs the full image test suite; only after that
+# passes does it push and sign. A broken factory release therefore surfaces
+# as a red run on main with versions.yaml already naming the culprit — the
+# known-good published DevBox is never replaced by an untested one.
+#
+# Rollback: `git revert` the pin commit, or dispatch this workflow with the
+# previous base_version + base_digest (the one path allowed to move the pin
+# backwards).
+name: base-image-update
+
+"on":
+  repository_dispatch:
+    types: [base-image-published]
+  workflow_dispatch:
+    inputs:
+      base_version:
+        description: 'Specific factory version to adopt, e.g. "1.0.2". Empty = reconcile against the newest published release.'
+        type: string
+        required: false
+        default: ''
+      base_digest:
+        description: 'Manifest digest for base_version ("sha256:…"). Empty = resolve it from the registry.'
+        type: string
+        required: false
+        default: ''
+  schedule:
+    # Every 4 hours: this is the PRIMARY adoption path (see the file header),
+    # not just a rare-outage backstop, so it runs often enough that "no
+    # cross-repo token configured" still means same-morning adoption rather
+    # than a next-Monday one. A no-op run (pin already current) costs one
+    # cheap registry poll — safe to run this often.
+    - cron: '15 */4 * * *'
+
+# contents: write — the pin commit lands on main. actions: write — this
+# workflow dispatches build-devbox.yml in the same repository afterwards.
+permissions:
+  contents: write
+  actions: write
+
+defaults:
+  run:
+    shell: bash            # bash -eo pipefail; the default `bash -e` has no pipefail
+
+# One adoption at a time, and never cancel a running one: a queued newer event
+# waits for the older one to finish, then finds the pin already newer than (or
+# equal to) its own target and the compare step handles it — either a clean
+# "nothing to do" or the downgrade guard. Cancelling mid-commit is the only
+# way an older adoption could clobber a newer one, so it is never allowed.
+concurrency:
+  group: base-image-update
+  cancel-in-progress: false
+
+jobs:
+
+  adopt:
+    name: verify and adopt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      # Always operate on main's tip, whatever ref delivered the event — the
+      # pin lives on main and the commit goes to main.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: log in to the registry
+        run: |
+          # Both keychains, same reasoning as build-devbox.yml: skopeo reads
+          # containers/auth.json, cosign reads the Docker keychain. The base
+          # package grants this repository read access via GITHUB_TOKEN.
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # -----------------------------------------------------------------------
+      # Decide which {version, digest} to adopt. Payload and inputs reach the
+      # script through the environment, never by inline interpolation — a
+      # dispatch payload is remote-controlled text, and inline `${{ }}` inside
+      # `run:` is the standard Actions shell-injection.
+      # -----------------------------------------------------------------------
+      - name: resolve target
+        id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PAYLOAD_REPOSITORY: ${{ github.event.client_payload.repository }}
+          PAYLOAD_VERSION: ${{ github.event.client_payload.version }}
+          PAYLOAD_DIGEST: ${{ github.event.client_payload.digest }}
+          PAYLOAD_FACTORY_SHA: ${{ github.event.client_payload.factory_git_sha }}
+          PAYLOAD_RUN_URL: ${{ github.event.client_payload.factory_run_url }}
+          INPUT_VERSION: ${{ inputs.base_version }}
+          INPUT_DIGEST: ${{ inputs.base_digest }}
+        run: |
+          set -euo pipefail
+          base_repo="$(yq -r '.base.repo' versions.yaml)"
+          semver_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+          digest_re='^sha256:[a-f0-9]{64}$'
+
+          version='' digest='' trigger='' explicit=false factory_sha='' run_url=''
+
+          case "$EVENT_NAME" in
+            repository_dispatch)
+              # The factory told us. Believe nothing yet — check the payload
+              # names OUR pinned base repo (any other repository, however
+              # friendly-looking, is refused) and that version and digest are
+              # even the right shape. Whether the digest is real and signed is
+              # the verify step's job.
+              trigger=dispatch
+              factory_sha="$PAYLOAD_FACTORY_SHA"
+              run_url="$PAYLOAD_RUN_URL"
+              if [ "$PAYLOAD_REPOSITORY" != "$base_repo" ]; then
+                echo "::error::dispatch payload is for '${PAYLOAD_REPOSITORY}', but versions.yaml pins '${base_repo}' — refusing"
+                exit 1
+              fi
+              [[ "$PAYLOAD_VERSION" =~ $semver_re ]] || {
+                echo "::error::payload version '${PAYLOAD_VERSION}' is not X.Y.Z"; exit 1; }
+              [[ "$PAYLOAD_DIGEST" =~ $digest_re ]] || {
+                echo "::error::payload digest '${PAYLOAD_DIGEST}' is not a sha256 manifest digest"; exit 1; }
+              version="$PAYLOAD_VERSION"
+              digest="$PAYLOAD_DIGEST"
+              ;;
+            workflow_dispatch)
+              trigger=manual
+              if [ -n "$INPUT_DIGEST" ] && [ -z "$INPUT_VERSION" ]; then
+                # A digest alone cannot fill the pin: versions.yaml records
+                # version AND digest, and the version is what humans, Renovate
+                # and the factory's release notes all speak in.
+                echo "::error::base_digest given without base_version — the pin needs both (or neither, to reconcile)"
+                exit 1
+              fi
+              if [ -n "$INPUT_VERSION" ]; then
+                explicit=true      # a human named a release — rollback allowed
+                [[ "$INPUT_VERSION" =~ $semver_re ]] || {
+                  echo "::error::base_version '${INPUT_VERSION}' is not X.Y.Z"; exit 1; }
+                version="$INPUT_VERSION"
+                if [ -n "$INPUT_DIGEST" ]; then
+                  [[ "$INPUT_DIGEST" =~ $digest_re ]] || {
+                    echo "::error::base_digest '${INPUT_DIGEST}' is not a sha256 manifest digest"; exit 1; }
+                  digest="$INPUT_DIGEST"
+                fi
+              fi
+              # Both inputs empty: fall through to reconciliation below.
+              ;;
+            schedule)
+              trigger=schedule
+              ;;
+            *)
+              echo "::error::unexpected event '${EVENT_NAME}'"; exit 1
+              ;;
+          esac
+
+          if [ -z "$version" ]; then
+            # Reconcile: ask the registry — not a cache, not an event, not a
+            # guess — what the newest published release is, and converge on it.
+            echo "reconciling against the registry: ${base_repo}"
+            version="$(skopeo list-tags "docker://${base_repo}" \
+              | jq -r '.Tags[]' | grep -E "$semver_re" | sort -V | tail -1 || true)"
+            if [ -z "$version" ]; then
+              echo "::error::no X.Y.Z release tags found on ${base_repo} — nothing to reconcile against"
+              exit 1
+            fi
+          fi
+
+          if [ -z "$digest" ]; then
+            digest="$(skopeo inspect --format '{{.Digest}}' "docker://${base_repo}:${version}")"
+            [[ "$digest" =~ $digest_re ]] || {
+              echo "::error::registry returned an unusable digest '${digest}' for ${base_repo}:${version}"; exit 1; }
+          fi
+
+          echo "target: ${base_repo} ${version} @ ${digest} (trigger=${trigger}, explicit=${explicit})"
+          {
+            echo "repo=${base_repo}"
+            echo "version=${version}"
+            echo "digest=${digest}"
+            echo "trigger=${trigger}"
+            echo "explicit=${explicit}"
+            echo "factory_sha=${factory_sha}"
+            echo "run_url=${run_url}"
+          } >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Compare against the pin. Two exits that are not adoptions:
+      #
+      #   * Already pinned — say so and stop, green. This is what makes every
+      #     trigger safe to fire forever: the dispatch, the reconciler and a
+      #     bored human can all run on the same day and only the first one
+      #     that sees a difference does anything.
+      #   * Target LOWER than the pin — refuse, unless a human asked for that
+      #     exact version by hand. This kills the stale-event race: a delayed
+      #     or replayed `base-image-published` for 1.0.1 arriving after 1.0.2
+      #     was adopted must not quietly downgrade the fleet. Rollback stays
+      #     possible; it just requires a person to name the version.
+      # -----------------------------------------------------------------------
+      - name: compare
+        id: compare
+        env:
+          TARGET_VERSION: ${{ steps.target.outputs.version }}
+          TARGET_DIGEST: ${{ steps.target.outputs.digest }}
+          EXPLICIT: ${{ steps.target.outputs.explicit }}
+        run: |
+          set -euo pipefail
+          pinned_version="$(yq -r '.base.version' versions.yaml)"
+          pinned_digest="$(yq -r '.base.digest' versions.yaml)"
+          echo "pinned: ${pinned_version} @ ${pinned_digest}"
+          echo "target: ${TARGET_VERSION} @ ${TARGET_DIGEST}"
+
+          if [ "$TARGET_VERSION" = "$pinned_version" ] && [ "$TARGET_DIGEST" = "$pinned_digest" ]; then
+            echo "::notice::DevBox already tracks ${TARGET_VERSION}@${TARGET_DIGEST} — nothing to do"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$TARGET_VERSION" != "$pinned_version" ]; then
+            lowest="$(printf '%s\n%s\n' "$TARGET_VERSION" "$pinned_version" | sort -V | head -1)"
+            if [ "$lowest" = "$TARGET_VERSION" ] && [ "$EXPLICIT" != "true" ]; then
+              echo "::error::target ${TARGET_VERSION} is older than the pinned ${pinned_version}. Automated downgrades are refused — if this rollback is intended, dispatch this workflow with base_version and base_digest set explicitly."
+              exit 1
+            fi
+          fi
+          # Same version, different digest: the factory re-published the tag.
+          # Adopt it — the pin's job is to record what the tag actually names,
+          # and the verify step below still gates it on a valid signature.
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # Same cached-binary install the other workflows use; pin matches
+      # security.cosign in versions.yaml.
+      - uses: ./.github/actions/go-tools
+        if: steps.compare.outputs.changed == 'true'
+        with:
+          tools: github.com/sigstore/cosign/v2/cmd/cosign@v2.6.5
+
+      # -----------------------------------------------------------------------
+      # The gate. The payload (or the registry listing) proposed a digest;
+      # before the pin moves, that digest must (a) actually exist as a
+      # manifest in the registry and (b) carry a keyless cosign signature
+      # whose certificate was issued to a workflow of the factory repository
+      # by GitHub's OIDC issuer. Anyone can send a repository_dispatch with a
+      # plausible-looking payload; nobody but the factory's own Actions runs
+      # can produce that signature.
+      # -----------------------------------------------------------------------
+      - name: verify before adopting
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+          TARGET_DIGEST: ${{ steps.target.outputs.digest }}
+        run: |
+          set -euo pipefail
+          echo "manifest check: ${TARGET_REPO}@${TARGET_DIGEST}"
+          skopeo inspect --format 'manifest exists: {{.Digest}}' \
+            "docker://${TARGET_REPO}@${TARGET_DIGEST}"
+
+          echo "signature check: ${TARGET_REPO}@${TARGET_DIGEST}"
+          cosign verify "${TARGET_REPO}@${TARGET_DIGEST}" \
+            --certificate-identity-regexp 'https://github.com/droderiquesit/base-image-factory/' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+      # -----------------------------------------------------------------------
+      # Move the pin and commit it to main. A CI commit to main is the designed
+      # mechanism here, not a convention breach: the review that matters for a
+      # base bump is build-devbox's full test suite, which gates the PUBLISH,
+      # not the pin. The commit is deliberately tiny and self-describing so
+      # that rollback is one `git revert`.
+      #
+      # The edit is a range-limited sed rather than `yq -i`: mikefarah yq
+      # rewrites the whole document on -i (blank lines dropped, every aligned
+      # comment in the manifest re-packed), which would bury a two-line bump
+      # in a 100-line cosmetic diff. sed touches exactly the two lines inside
+      # the `base:` block — both values are regex-validated above, so nothing
+      # unshaped can reach the pattern — and yq then re-reads the file to
+      # prove the edit landed where it was aimed.
+      # -----------------------------------------------------------------------
+      - name: adopt
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          TARGET_VERSION: ${{ steps.target.outputs.version }}
+          TARGET_DIGEST: ${{ steps.target.outputs.digest }}
+          TRIGGER: ${{ steps.target.outputs.trigger }}
+          FACTORY_SHA: ${{ steps.target.outputs.factory_sha }}
+          RUN_URL: ${{ steps.target.outputs.run_url }}
+        run: |
+          set -euo pipefail
+          sed -i -E "/^base:/,/^[^ #]/ {
+            s|^(  version: )\"[^\"]*\"|\1\"${TARGET_VERSION}\"|
+            s|^(  digest: )\"[^\"]*\"|\1\"${TARGET_DIGEST}\"|
+          }" versions.yaml
+
+          # Prove the edit: read the file back the way image-ref.sh will.
+          [ "$(yq -r '.base.version' versions.yaml)" = "$TARGET_VERSION" ] || {
+            echo "::error::versions.yaml base.version did not take the edit"; exit 1; }
+          [ "$(yq -r '.base.digest' versions.yaml)" = "$TARGET_DIGEST" ] || {
+            echo "::error::versions.yaml base.digest did not take the edit"; exit 1; }
+          git diff -- versions.yaml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add versions.yaml
+          git commit -F - <<EOF
+          chore(base): adopt ai-engineering ${TARGET_VERSION}
+
+          digest: ${TARGET_DIGEST}
+          factory sha: ${FACTORY_SHA:-reconciler}
+          trigger: ${TRIGGER}${RUN_URL:+ (${RUN_URL})}
+          EOF
+          # Loop prevention is GitHub's, not ours: pushes made with the
+          # workflow-provided GITHUB_TOKEN do not create `push`-event workflow
+          # runs, so this commit does NOT start build-devbox (or ci, or this
+          # workflow) by itself. That suppression is exactly why the next step
+          # dispatches the pipeline explicitly.
+          git push origin main
+
+      # -----------------------------------------------------------------------
+      # Hand off to the existing pipeline — this workflow never builds or
+      # publishes an image itself. build-devbox.yml pulls the digest the pin
+      # now names (hard error if it vanished), builds, runs the full image
+      # test suite, scans, and only then pushes and signs. workflow_dispatch
+      # is one of the two event types GitHub still delivers for GITHUB_TOKEN-
+      # initiated actions, which is what makes this hand-off possible at all;
+      # `actions: write` covers same-repo dispatch.
+      # -----------------------------------------------------------------------
+      - name: build and publish
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run build-devbox.yml --ref main -f push_image=true \
+            -R "$GITHUB_REPOSITORY"
+          echo "::notice::build-devbox dispatched on main — it publishes only after the full test suite passes against the new base"
+
+      - name: summary
+        if: always()
+        env:
+          TARGET_VERSION: ${{ steps.target.outputs.version }}
+          TARGET_DIGEST: ${{ steps.target.outputs.digest }}
+          TRIGGER: ${{ steps.target.outputs.trigger }}
+          CHANGED: ${{ steps.compare.outputs.changed }}
+        run: |
+          {
+            echo "### Base image adoption"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| trigger | ${TRIGGER:-unresolved} |"
+            echo "| target version | ${TARGET_VERSION:-unresolved} |"
+            echo "| target digest | \`${TARGET_DIGEST:-unresolved}\` |"
+            echo "| pin moved | ${CHANGED:-no (failed before compare)} |"
+          } >> "$GITHUB_STEP_SUMMARY"
