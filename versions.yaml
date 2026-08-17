@@ -33,9 +33,10 @@ metadata:
 # The base image — an EXTERNAL dependency, owned by the Base Image Factory
 # -----------------------------------------------------------------------------
 # The DevBox builds FROM a published release of the factory's ai-engineering
-# image (repo: droderiquesit/ai-devbox — see its docs/image-contract.md for
-# exactly what the base does and does not provide). It is a registry artefact,
-# pulled — never rebuilt as a side effect of a DevBox build.
+# image (repo: droderiquesit/base-image-factory — see its
+# docs/image-contract.md for exactly what the base does and does not
+# provide). It is a registry artefact, pulled — never rebuilt as a side
+# effect of a DevBox build.
 #
 # Bumping `version` (+ `digest`) here IS the base patching mechanism: one
 # reviewable, revertable commit, gated by this repository's full test suite
