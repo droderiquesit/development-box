@@ -310,15 +310,17 @@ for h in image-ref.sh podman-build.sh publish-image.sh; do
 done
 
 sect "container definitions"
-# One Containerfile: the base image is an external dependency built by the
-# Base Image Factory repository, not defined here.
-for cf in Containerfile; do
-  grep -qE '^USER +\$\{?DEV_USER' "$cf" && ok "${cf}: ends as non-root" || no "${cf}: no non-root USER"
-  grep -q 'HEALTHCHECK' "$cf" && ok "${cf}: has a HEALTHCHECK" || warn "${cf}: no HEALTHCHECK"
-  # BuildKit-only syntax must not creep in — podman/buildah must build this.
-  grep -qE '^RUN --mount' "$cf" && no "${cf}: uses BuildKit-only RUN --mount" || ok "${cf}: BuildKit-independent"
-  grep -qE '<<[A-Z]' "$cf" && no "${cf}: uses BuildKit-only heredoc" || ok "${cf}: no heredocs"
-done
+# ONE Containerfile, deliberately: the base image is an external dependency
+# built by the Base Image Factory repository, not defined here. This was a
+# `for cf in Containerfile Containerfile.base` loop before the split; with a
+# single item left it is just a statement (and shellcheck SC2043 rightly said
+# so). The "no second base definition" invariant is asserted below instead.
+cf=Containerfile
+grep -qE '^USER +\$\{?DEV_USER' "$cf" && ok "${cf}: ends as non-root" || no "${cf}: no non-root USER"
+grep -q 'HEALTHCHECK' "$cf" && ok "${cf}: has a HEALTHCHECK" || warn "${cf}: no HEALTHCHECK"
+# BuildKit-only syntax must not creep in — podman/buildah must build this.
+grep -qE '^RUN --mount' "$cf" && no "${cf}: uses BuildKit-only RUN --mount" || ok "${cf}: BuildKit-independent"
+grep -qE '<<[A-Z]' "$cf" && no "${cf}: uses BuildKit-only heredoc" || ok "${cf}: no heredocs"
 # The tree must not quietly grow a second base definition back.
 [ ! -e Containerfile.base ] && ok "no in-repo base Containerfile (owned by the factory)" \
   || no "Containerfile.base reappeared — the base image belongs to the factory repository"

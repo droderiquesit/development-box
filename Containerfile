@@ -31,7 +31,7 @@
 # version) lives in that repository, not this one. Keep this default in step
 # with the `base:` section of versions.yaml; CI passes the resolved ref
 # (digest-pinned when versions.yaml pins one) explicitly.
-ARG BASE_IMAGE_REF=ghcr.io/droderiquesit/ai-devbox/ai-engineering:1.0.0
+ARG BASE_IMAGE_REF=ghcr.io/droderiquesit/base-image-factory/ai-engineering:1.0.1
 
 # -----------------------------------------------------------------------------
 # STAGE 1 — builder. Compiles every Go tool. Discarded afterwards, so the ~1.2 GB

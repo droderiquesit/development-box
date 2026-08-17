@@ -48,10 +48,10 @@ metadata:
 # runtime pins — moved with the base's lifecycle to the factory repository
 # (images/ai-engineering/versions.yaml there). See docs/decisions.md.
 base:
-  repo: ghcr.io/droderiquesit/ai-devbox/ai-engineering
+  repo: ghcr.io/droderiquesit/base-image-factory/ai-engineering
   # renovate: the custom manager in renovate.json tracks version+digest as one
-  version: "1.0.0"
-  digest: "sha256:19136c55e66cd631bfe92396576eeed0c9eba3f6948d0a9578e0cddeaa90c151"
+  version: "1.0.1"
+  digest: "sha256:8a2b04bba177b5790563eb2b2a48947e5388e7a14b190743f13b62e308d25f77"
 
 # -----------------------------------------------------------------------------
 # Infrastructure as Code
