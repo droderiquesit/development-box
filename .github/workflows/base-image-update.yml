@@ -261,6 +261,31 @@ jobs:
 
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
+          # ---------------------------------------------------------------
+          # Is this a PATCH-level base adoption?
+          # ---------------------------------------------------------------
+          # A base patch is, by the factory's own versioning rule, the same
+          # contract rebuilt — an upstream OS rotation, i.e. security fixes.
+          # Those must reach consumers who pin a DevBox version, and a
+          # rebuilt :edge does not reach them at all. So a patch adoption
+          # auto-cuts a DevBox patch release (see the release step below).
+          #
+          # Minor and major base adoptions deliberately do NOT auto-cut: they
+          # can change the contract, and deciding what that means for the
+          # DevBox's own version is a judgement, not an increment.
+          # A same-version digest re-publish counts as patch-level too — the
+          # content changed for the same reason.
+          same_line() {
+            [ "${1%.*}" = "${2%.*}" ]
+          }
+          if same_line "$TARGET_VERSION" "$pinned_version"; then
+            echo "patch_level=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::patch-level base adoption (${pinned_version} -> ${TARGET_VERSION}) — a DevBox patch release will be cut"
+          else
+            echo "patch_level=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${pinned_version} -> ${TARGET_VERSION} is not patch-level — publishing :edge only; cutting a DevBox version is left to a human"
+          fi
+
       # Same cached-binary install the other workflows use; pin matches
       # security.cosign in versions.yaml.
       - uses: ./.github/actions/go-tools
@@ -309,6 +334,7 @@ jobs:
       # prove the edit landed where it was aimed.
       # -----------------------------------------------------------------------
       - name: adopt
+        id: adopt
         if: steps.compare.outputs.changed == 'true'
         env:
           TARGET_VERSION: ${{ steps.target.outputs.version }}
@@ -316,6 +342,7 @@ jobs:
           TRIGGER: ${{ steps.target.outputs.trigger }}
           FACTORY_SHA: ${{ steps.target.outputs.factory_sha }}
           RUN_URL: ${{ steps.target.outputs.run_url }}
+          PATCH_LEVEL: ${{ steps.compare.outputs.patch_level }}
         run: |
           set -euo pipefail
           sed -i -E "/^base:/,/^[^ #]/ {
@@ -328,17 +355,36 @@ jobs:
             echo "::error::versions.yaml base.version did not take the edit"; exit 1; }
           [ "$(yq -r '.base.digest' versions.yaml)" = "$TARGET_DIGEST" ] || {
             echo "::error::versions.yaml base.digest did not take the edit"; exit 1; }
+
+          # On a patch-level adoption the DevBox cuts its own patch release,
+          # so its version moves in the SAME commit as the pin. Keeping them
+          # in one commit is what makes "which base is DevBox 1.0.2 on?"
+          # answerable from a single `git show`, and release.yml refuses to
+          # release at all unless the tag and release.devbox already agree.
+          devbox_version=""
+          if [ "$PATCH_LEVEL" = "true" ]; then
+            current="$(yq -r '.release.devbox' versions.yaml)"
+            IFS=. read -r dmaj dmin dpatch <<<"$current"
+            devbox_version="${dmaj}.${dmin}.$((dpatch + 1))"
+            sed -i -E "/^release:/,/^[^ #]/ s|^(  devbox: )\"[^\"]*\"|\1\"${devbox_version}\"|" versions.yaml
+            [ "$(yq -r '.release.devbox' versions.yaml)" = "$devbox_version" ] || {
+              echo "::error::versions.yaml release.devbox did not take the edit"; exit 1; }
+            echo "devbox_version=${devbox_version}" >> "$GITHUB_OUTPUT"
+          fi
           git diff -- versions.yaml
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add versions.yaml
           git commit -F - <<EOF
-          chore(base): adopt ai-engineering ${TARGET_VERSION}
+          chore(base): adopt ai-engineering ${TARGET_VERSION}${devbox_version:+ — DevBox ${devbox_version}}
 
           digest: ${TARGET_DIGEST}
           factory sha: ${FACTORY_SHA:-reconciler}
-          trigger: ${TRIGGER}${RUN_URL:+ (${RUN_URL})}
+          trigger: ${TRIGGER}${RUN_URL:+ (${RUN_URL})}${devbox_version:+
+          A base patch is an upstream rebuild — security fixes. Cutting
+          DevBox ${devbox_version} so consumers pinning a version receive them;
+          a rebuilt :edge alone would never reach them.}
           EOF
           # Loop prevention is GitHub's, not ours: pushes made with the
           # workflow-provided GITHUB_TOKEN do not create `push`-event workflow
@@ -357,7 +403,7 @@ jobs:
       # `actions: write` covers same-repo dispatch.
       # -----------------------------------------------------------------------
       - name: build and publish
-        if: steps.compare.outputs.changed == 'true'
+        if: steps.compare.outputs.changed == 'true' && steps.compare.outputs.patch_level != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -365,6 +411,39 @@ jobs:
           gh workflow run build-devbox.yml --ref main -f push_image=true \
             -R "$GITHUB_REPOSITORY"
           echo "::notice::build-devbox dispatched on main — it publishes only after the full test suite passes against the new base"
+
+      # -----------------------------------------------------------------------
+      # Patch-level adoptions cut a real release instead.
+      # -----------------------------------------------------------------------
+      # A base patch is an upstream OS rebuild — in practice, security fixes.
+      # Rebuilding :edge does not deliver those to anyone pinning a DevBox
+      # version, which is the whole population that pinning is meant to
+      # protect. So the chain finishes the job: adopt the base, bump the
+      # DevBox patch, and cut the release.
+      #
+      # release.yml is dispatched INSTEAD of build-devbox, not in addition:
+      # it already re-verifies the tag against versions.yaml, confirms the
+      # pinned base exists, runs the full image test suite, and only then
+      # publishes the semver ladder and signs by digest. Running both would
+      # mean two ~35-minute builds of identical content.
+      #
+      # Failure isolation is unchanged and worth being explicit about: if the
+      # new base breaks the DevBox, release.yml fails IN THE TEST SUITE,
+      # before it publishes or tags anything. A broken base therefore cannot
+      # produce a released version — it produces a red run on main with the
+      # pin commit naming the culprit, exactly as before.
+      - name: cut the DevBox patch release
+        if: steps.compare.outputs.changed == 'true' && steps.compare.outputs.patch_level == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEVBOX_VERSION: ${{ steps.adopt.outputs.devbox_version }}
+        run: |
+          set -euo pipefail
+          [ -n "$DEVBOX_VERSION" ] || {
+            echo "::error::patch-level adoption but no DevBox version was computed"; exit 1; }
+          gh workflow run release.yml --ref main -f "tag=v${DEVBOX_VERSION}" \
+            -R "$GITHUB_REPOSITORY"
+          echo "::notice::release.yml dispatched for v${DEVBOX_VERSION} — it tests against the new base first, then publishes the semver ladder and signs"
 
       - name: summary
         if: always()
