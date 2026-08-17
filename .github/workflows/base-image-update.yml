@@ -2,7 +2,7 @@
 # =============================================================================
 # BASE IMAGE UPDATE — adopt published factory releases automatically.
 # =============================================================================
-# The Base Image Factory (droderiquesit/ai-devbox) publishes a release; this
+# The Base Image Factory (droderiquesit/base-image-factory) publishes a release; this
 # workflow moves the `base:` pin in versions.yaml onto it and kicks off the
 # full DevBox pipeline. It is the automated half of the patching mechanism
 # that docs/releases.md describes as a two-line reviewable commit — the commit
@@ -290,7 +290,7 @@ jobs:
 
           echo "signature check: ${TARGET_REPO}@${TARGET_DIGEST}"
           cosign verify "${TARGET_REPO}@${TARGET_DIGEST}" \
-            --certificate-identity-regexp 'https://github.com/droderiquesit/ai-devbox/' \
+            --certificate-identity-regexp 'https://github.com/droderiquesit/base-image-factory/' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
       # -----------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # The automated rebuild chain — DevBox side
 
-The Base Image Factory ([`droderiquesit/ai-devbox`](https://github.com/droderiquesit/ai-devbox))
+The Base Image Factory ([`droderiquesit/base-image-factory`](https://github.com/droderiquesit/base-image-factory))
 publishes a release; within a few hours at most (often seconds) a freshly
 built, fully tested, signed DevBox sits in the registry on top of it — with no
 human in the loop and no step of the existing pipeline skipped. This page
@@ -38,7 +38,7 @@ flowchart LR
 Step by step:
 
 1. **Factory publish.** The factory's release workflow pushes and signs
-   `ghcr.io/droderiquesit/ai-devbox/ai-engineering:X.Y.Z`, then sends a
+   `ghcr.io/droderiquesit/base-image-factory/ai-engineering:X.Y.Z`, then sends a
    `repository_dispatch` (`event_type: base-image-published`) to this
    repository. The payload names the repository, version, digest, the
    factory's git SHA and the run URL that produced it.
@@ -47,7 +47,7 @@ Step by step:
    `base.repo` pins, shape-checks version and digest, confirms the manifest
    actually exists, and `cosign verify`s the digest against the factory's
    keyless signing identity (certificate identity
-   `https://github.com/droderiquesit/ai-devbox/…`, issuer
+   `https://github.com/droderiquesit/base-image-factory/…`, issuer
    `https://token.actions.githubusercontent.com`). Anyone can send a
    plausible dispatch event; only the factory's own Actions runs can produce
    that signature.

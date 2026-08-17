@@ -110,7 +110,7 @@ flowchart TB
 ### 1. Two images, not one — and now two repositories
 
 The base image is owned by the **Base Image Factory** repository
-([`droderiquesit/ai-devbox`](https://github.com/droderiquesit/ai-devbox)),
+([`droderiquesit/base-image-factory`](https://github.com/droderiquesit/base-image-factory)),
 which builds, tests, scans, signs and versions it independently. This
 repository consumes a published release of it — pinned by repo + version +
 digest in `versions.yaml`'s `base:` section — the same way any other

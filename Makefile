@@ -101,7 +101,7 @@ pull-base: ## Pull the pinned base image release from the registry
 .PHONY: build-base
 build-base: ## (moved) The base image is built by the Base Image Factory repo
 	@echo "The base image is an external dependency owned by the Base Image"
-	@echo "Factory repository (github.com/droderiquesit/ai-devbox)."
+	@echo "Factory repository (github.com/droderiquesit/base-image-factory)."
 	@echo "Develop it there: images/ai-engineering/ + 'make build IMAGE=ai-engineering'."
 	@echo "This repository only consumes the published release pinned in versions.yaml."
 	@exit 1

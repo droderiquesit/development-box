@@ -122,7 +122,7 @@ podman machine start
 
 The base image (OS, non-root user, Go/Node/Python + uv) is an external
 dependency — a published, signed release of the [Base Image
-Factory](https://github.com/droderiquesit/ai-devbox), pinned by
+Factory](https://github.com/droderiquesit/base-image-factory), pinned by
 repo + version + digest in `versions.yaml`. It is pulled, never built here.
 
 ```bash

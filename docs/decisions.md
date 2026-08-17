@@ -28,7 +28,7 @@ duplicate output trains people to skim.
 > repository split, the base image's entire lifecycle — distro choice,
 > runtime pins, hardening, build, test, scan, sign, versioning — is owned by
 > the **Base Image Factory** repository
-> ([`droderiquesit/ai-devbox`](https://github.com/droderiquesit/ai-devbox);
+> ([`droderiquesit/base-image-factory`](https://github.com/droderiquesit/base-image-factory);
 > see its `docs/adr/001-separate-base-image-factory.md` for the full decision
 > record and `docs/image-contract.md` for the enforced boundary of what a
 > base provides vs. what this repository adds). This repository consumes a
