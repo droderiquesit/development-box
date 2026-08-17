@@ -14,7 +14,7 @@
 # `make pull` can never disagree about which image is meant.
 #
 # The base is an EXTERNAL dependency: a published release of the Base Image
-# Factory (droderiquesit/ai-devbox), named fully — repo, version and, when
+# Factory (droderiquesit/base-image-factory), named fully — repo, version and, when
 # pinned, digest — in versions.yaml's `base:` section. It is never derived
 # from this repository's own identity, because it isn't this repository's
 # image. Moving to a new base is an explicit, reviewable edit to that file.

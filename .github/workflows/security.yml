@@ -44,7 +44,7 @@ jobs:
       matrix:
         image:
           # Only the DevBox image — the base is scanned weekly by its own
-          # repository (the Base Image Factory, droderiquesit/ai-devbox).
+          # repository (the Base Image Factory, droderiquesit/base-image-factory).
           - ghcr.io/${{ github.repository }}:latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -108,6 +108,14 @@ jobs:
 
       - uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         if: hashFiles('semgrep.sarif') != ''
+        # Same reasoning as the trivy upload above, which already had this and
+        # this one was missing: code scanning is a paid feature on private
+        # repositories, so the upload fails with "Resource not accessible by
+        # integration". Semgrep still ran and the SARIF still exists; there is
+        # simply nowhere to put it. Failing the security job over a missing
+        # *destination* teaches people to ignore a red security job, which is
+        # far more dangerous than an unpublished report.
+        continue-on-error: true
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -132,7 +140,15 @@ jobs:
         run: |
           # The image policy asserts the things §31 requires: non-root user,
           # pinned base, no embedded secrets, explicit healthcheck.
-          conftest test --policy security/policy/container Containerfile
+          #
+          # --parser dockerfile is REQUIRED, not decoration: conftest picks a
+          # parser from the file extension, and this file is called
+          # `Containerfile`, which matches nothing it knows. Without the flag
+          # it exits 1 with "unknown parser: , path: Containerfile" — so this
+          # policy had never actually evaluated. The rules expect the
+          # dockerfile parser's shape (input[i].Cmd), which is what this
+          # selects.
+          conftest test --parser dockerfile --policy security/policy/container Containerfile
 
       - name: MCP registry conforms to the MCP policy
         run: |

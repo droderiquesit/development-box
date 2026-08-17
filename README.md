@@ -122,7 +122,7 @@ podman machine start
 
 The base image (OS, non-root user, Go/Node/Python + uv) is an external
 dependency — a published, signed release of the [Base Image
-Factory](https://github.com/droderiquesit/ai-devbox), pinned by
+Factory](https://github.com/droderiquesit/base-image-factory), pinned by
 repo + version + digest in `versions.yaml`. It is pulled, never built here.
 
 ```bash
@@ -475,6 +475,7 @@ Common ones; the rest is in
 | [docs/mcp.md](docs/mcp.md) | Registry, trust profiles, scoping, threat model |
 | [docs/security.md](docs/security.md) | Guardrails, secrets, hardening, supply chain, limitations |
 | [docs/releases.md](docs/releases.md) | Version streams, base patching, the tag ladder, build caching |
+| [docs/automation.md](docs/automation.md) | The automated rebuild chain: factory dispatch, daily reconciler, rollback |
 | [docs/decisions.md](docs/decisions.md) | Every tool, classified with a reason |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Podman, VS Code, Terraform, AI, MCP |
 

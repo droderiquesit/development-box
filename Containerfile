@@ -31,7 +31,7 @@
 # version) lives in that repository, not this one. Keep this default in step
 # with the `base:` section of versions.yaml; CI passes the resolved ref
 # (digest-pinned when versions.yaml pins one) explicitly.
-ARG BASE_IMAGE_REF=ghcr.io/droderiquesit/ai-devbox/ai-engineering:1.0.0
+ARG BASE_IMAGE_REF=ghcr.io/droderiquesit/base-image-factory/ai-engineering:1.0.1
 
 # -----------------------------------------------------------------------------
 # STAGE 1 — builder. Compiles every Go tool. Discarded afterwards, so the ~1.2 GB
@@ -69,6 +69,10 @@ USER root
 SHELL ["/bin/bash", "-lc"]
 
 ARG BASE_IMAGE_REF
+# The manifest digest the base ref resolved to at build time — CI passes it
+# from the resolve step so the shipped image names its exact foundation, not
+# just the tag that was asked for. "unknown" only in ad-hoc local builds.
+ARG BASE_IMAGE_DIGEST=unknown
 ARG DEV_USER=dev
 ARG DEV_UID=1000
 ARG DEV_GID=1000
@@ -93,7 +97,8 @@ LABEL org.opencontainers.image.title="ai-devbox" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.base.name="${BASE_IMAGE_REF}"
+      org.opencontainers.image.base.name="${BASE_IMAGE_REF}" \
+      org.opencontainers.image.base.digest="${BASE_IMAGE_DIGEST}"
 
 ENV FEATURE_CLOUD_AWS=${FEATURE_CLOUD_AWS} \
     FEATURE_CLOUD_AZURE=${FEATURE_CLOUD_AZURE} \
