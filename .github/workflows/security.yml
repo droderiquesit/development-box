@@ -47,7 +47,7 @@ jobs:
           # repository (the Base Image Factory, droderiquesit/base-image-factory).
           - ghcr.io/${{ github.repository }}:latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/trivy
 
@@ -58,7 +58,7 @@ jobs:
             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
         continue-on-error: true      # the image may not be published yet
 
-      - uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
+      - uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         if: hashFiles('trivy.sarif') != ''
         # Code scanning may not be enabled — it is a paid feature on private
         # repositories. Trivy still ran and the SARIF is still produced; there
@@ -71,7 +71,7 @@ jobs:
           category: trivy-${{ strategy.job-index }}
 
       - name: keep the SARIF regardless
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && hashFiles('trivy.sarif') != ''
         with:
           name: trivy-sarif-${{ strategy.job-index }}
@@ -86,7 +86,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -106,7 +106,7 @@ jobs:
           pipx install semgrep==1.145.0
           semgrep scan --config p/ci --sarif --output semgrep.sarif --metrics=off . || true
 
-      - uses: github/codeql-action/upload-sarif@4e828ff8d448a8a6e532957b1811f387a63867e8 # v3.29.4
+      - uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         if: hashFiles('semgrep.sarif') != ''
         # Same reasoning as the trivy upload above, which already had this and
         # this one was missing: code scanning is a paid feature on private
@@ -125,7 +125,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/go-tools
         with:
@@ -162,7 +162,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/go-tools
         with:
