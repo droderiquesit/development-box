@@ -56,13 +56,35 @@ Step by step:
    `chore(base): adopt ai-engineering X.Y.Z` message that records the digest,
    the factory SHA and the trigger. Same two lines Renovate or a human would
    change; same one-commit revert.
-4. **Full pipeline.** The updater dispatches `build-devbox.yml` with
-   `push_image=true`. That workflow pulls the newly pinned digest (hard error
-   if it is missing), builds, runs the complete image test suite, produces
-   the SBOM, scans — and only *then* pushes and signs.
-5. **Publish.** `:edge` and `:sha` tags land, signed, with labels naming the
-   exact base they were built on. Cutting a versioned release remains a
-   deliberate human act via `release.yml`, exactly as before.
+4. **Full pipeline**, and which one depends on how big the base move was:
+
+   | Base adoption | Dispatched | Result |
+   |---|---|---|
+   | **patch** (1.0.1 → 1.0.2, or a same-version digest re-publish) | `release.yml` | full test suite, then the **semver ladder** published and signed — a real DevBox release |
+   | **minor / major** (1.0.x → 1.1.0, 2.0.0) | `build-devbox.yml` | full test suite, then `:edge` + `:sha` only |
+
+   Either way the image is built from the newly pinned digest (hard error if
+   it is missing), the complete image test suite runs, the SBOM is produced
+   and the scan happens — **before** anything is pushed or tagged.
+
+5. **Why a patch auto-cuts a version.** A base patch is, by the factory's own
+   rule, the same contract rebuilt: an upstream OS rotation, which in practice
+   means security fixes. Rebuilding `:edge` does not deliver those to anyone
+   pinning a DevBox version — and pinning a version is exactly what the
+   cautious consumer does. Leaving the release to a human meant the most
+   security-relevant updates reached the fewest users. So the chain finishes
+   the job: adopt the base, bump the DevBox patch **in the same commit**, cut
+   the release.
+
+   Minor and major base adoptions deliberately do **not** auto-cut. Those can
+   change the contract, and deciding what that means for the DevBox's own
+   version is a judgement, not an increment — they publish `:edge` and wait
+   for a human.
+
+   Failure isolation is unchanged: a base that breaks the DevBox fails
+   `release.yml` *in the test suite*, before it publishes or tags anything.
+   A broken base cannot produce a released version — only a red run on `main`
+   with the pin commit naming the culprit.
 
 ## The reconciler — the primary mechanism, not a backstop
 
