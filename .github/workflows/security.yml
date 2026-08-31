@@ -58,7 +58,7 @@ jobs:
             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
         continue-on-error: true      # the image may not be published yet
 
-      - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+      - uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         if: hashFiles('trivy.sarif') != ''
         # Code scanning may not be enabled — it is a paid feature on private
         # repositories. Trivy still ran and the SARIF is still produced; there
@@ -106,7 +106,7 @@ jobs:
           pipx install semgrep==1.145.0
           semgrep scan --config p/ci --sarif --output semgrep.sarif --metrics=off . || true
 
-      - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+      - uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         if: hashFiles('semgrep.sarif') != ''
         # Same reasoning as the trivy upload above, which already had this and
         # this one was missing: code scanning is a paid feature on private
