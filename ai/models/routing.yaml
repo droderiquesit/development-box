@@ -89,6 +89,11 @@ routing:
 
   offline:
     primary: local
+  healing:
+    primary: nemotron
+    reviewer: claude-deep
+    profile: god_mode
+
 
   docs-sync:
     primary: claude

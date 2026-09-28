@@ -126,7 +126,7 @@ profiles:
       write: [/workspace, /tmp]
       execute: REVIEW_REQUIRED
     mcp_profile: PRIVILEGED
-    mcp_servers: [filesystem, git, github, fetch, context7, memory, postgres, slack, playwright, podman, sequential-thinking]
+    mcp_servers: [filesystem, git, github, fetch, context7, memory, postgres, slack, playwright, podman, sequential-thinking, graphipy, large-context-tool]
     network: privileged
 
 
