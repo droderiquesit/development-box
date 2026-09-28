@@ -99,8 +99,6 @@ routing:
     primary: claude
     reviewer: gemini
     profile: architecture
-    reviewer: null
-    profile: local
 
 # -----------------------------------------------------------------------------
 # Workflows. Each is a fixed pipeline of declared steps. `ai run <name>`.
