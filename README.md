@@ -65,7 +65,9 @@ Then in VS Code: **Dev Containers: Attach to Running Container** → `ai-devbox`
 
 | | Minimum | Notes |
 |---|---|---|
-| Podman | 4.0+ | Rootless. Docker Desktop is **not** required and not used. |
+| Podman | 4.0+ | Rootless. Docker Desktop is **not** required. |
+| Ollama | latest | Required for local inference. |
+| Hermes | latest | Required for agent orchestration. |
 | podman-compose *or* Docker Compose v2 | any recent | Only for `compose.yaml`; `make run` works without it. |
 | VS Code | any recent | With the **Dev Containers** extension. |
 | Disk | ~12 GB | Base ~1.7 GB, DevBox ~4 GB, plus caches. |

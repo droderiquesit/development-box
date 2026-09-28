@@ -89,6 +89,11 @@ routing:
 
   offline:
     primary: local
+
+  docs-sync:
+    primary: claude
+    reviewer: gemini
+    profile: architecture
     reviewer: null
     profile: local
 
