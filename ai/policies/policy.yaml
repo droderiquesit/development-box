@@ -157,7 +157,19 @@ execution:
     - "syft*"
     - "grype*"
 
-  REVIEW_REQUIRED: []
+  REVIEW_REQUIRED:
+    - "terraform init*"
+    - "tofu init*"
+    - "terragrunt init*"
+    - "npm install*"
+    - "pnpm add*"
+    - "uv add*"
+    - "pip install*"
+    - "go get*"
+    - "go mod*"
+    - "pre-commit*"
+    - "black*"
+    - "ruff format*"
 
   APPROVAL_REQUIRED:
     - "terraform apply*"
