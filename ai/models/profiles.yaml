@@ -98,6 +98,21 @@ profiles:
     mcp_servers: [filesystem]
     network: offline
 
+  super:
+    description: "Ultra-deep reasoning using Nemotron3-Super. For the most complex architectural and logic tasks."
+    provider: ollama
+    model: nemotron
+    reviewer: null
+    cost_preference: zero
+    max_output_tokens: 16384
+    permissions:
+      read: [/workspace]
+      write: [/workspace]
+      execute: REVIEW_REQUIRED
+    mcp_profile: DEVELOPER
+    mcp_servers: [filesystem, git, github, fetch, context7, sequential-thinking, memory]
+    network: offline
+
   architecture:
     description: "System design, tradeoff analysis, ADRs. Long context, no code execution."
     provider: anthropic
