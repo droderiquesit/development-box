@@ -88,6 +88,11 @@ model_list:
     litellm_params:
       model: ollama/deepseek-coder-v2:16b
       api_base: os.environ/OLLAMA_BASE_URL
+  - model_name: nemotron
+    litellm_params:
+      model: openai/nemotron3-super
+      api_base: os.environ/OPENAI_COMPATIBLE_BASE_URL
+      api_key: os.environ/OPENAI_COMPATIBLE_API_KEY
 
 litellm_settings:
   drop_params: true          # tolerate provider-specific params across backends

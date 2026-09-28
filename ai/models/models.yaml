@@ -126,10 +126,12 @@ providers:
   # Any OpenAI-compatible endpoint: vLLM, LM Studio, llama.cpp, a corporate
   # gateway, an internal proxy. One entry covers the whole class.
   openai_compatible:
-    enabled: false
+    enabled: true
     kind: openai_compatible
     base_url_env: OPENAI_COMPATIBLE_BASE_URL
     credential_env: OPENAI_COMPATIBLE_API_KEY
+    aliases:
+      nemotron: nemotron3-super
 
 # -----------------------------------------------------------------------------
 # The router. `ai` talks to native CLIs directly when one exists (so `claude`

@@ -3,7 +3,7 @@ name: cloud-agent
 profile: balanced
 model: claude
 reviewer: codex
-mcp_servers: [filesystem, git, fetch, context7]
+mcp_servers: [filesystem, git, fetch, context7, github, gcp]
 permissions: {read: [/workspace], write: [/workspace], execute: SAFE}
 rules: [cloud, terraform, secrets, engineering]
 ---
