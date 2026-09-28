@@ -20,19 +20,11 @@ Two enforcement levels are used, and the difference matters:
 
 Read and write:
 
-
-
 Read only:
-
-
 
 Never access — these hold credentials:
 
-
-
 Never read, never quote, never place in context, even from an allowed path:
-
-
 
 ## Command execution  _()_
 
@@ -60,20 +52,9 @@ Anything not listed defaults to ****.
 
 ## Secrets  _()_
 
-
-
 ## Network  _()_
 
-
-
 Never contact these — they are credential-minting endpoints:
-
-
-
-
-
-
-
 
 ## Autonomy limits  _()_
 

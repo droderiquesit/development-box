@@ -154,7 +154,7 @@ main() {
   info "source: ${POLICY_FILE}"
 
   local body
-  body="$(render_body)"
+  body="$(render_body | cat -s)"
   local rc=0
 
   # Claude Code
