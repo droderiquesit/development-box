@@ -36,6 +36,8 @@ filesystem:
     - /tmp
   read_only:
     - /opt/devbox            # the DevBox's own config and prompt library
+    - /etc/hostname
+    - /etc/os-release
   # Denied outright. Credential material is either not mounted at all, or
   # mounted read-only and excluded from every MCP server's path scope.
   denied:

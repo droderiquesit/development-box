@@ -113,6 +113,23 @@ profiles:
     mcp_servers: [filesystem, git, github, fetch, context7, sequential-thinking, memory]
     network: offline
 
+
+  god_mode:
+    description: "Maximum autonomy. Full system access for self-evolution and complex project management."
+    provider: ollama
+    model: nemotron
+    reviewer: claude-deep
+    cost_preference: high
+    max_output_tokens: 32768
+    permissions:
+      read: [/workspace, /etc, /var/log]
+      write: [/workspace, /tmp]
+      execute: REVIEW_REQUIRED
+    mcp_profile: PRIVILEGED
+    mcp_servers: [filesystem, git, github, fetch, context7, memory, postgres, slack, playwright, podman, sequential-thinking]
+    network: privileged
+
+
   architecture:
     description: "System design, tradeoff analysis, ADRs. Long context, no code execution."
     provider: anthropic
