@@ -134,19 +134,19 @@ write_if_changed() { # write_if_changed <path> <content>
   local path="$1" content="$2"
   if [ "$CHECK" = 1 ]; then
     if [ ! -r "$path" ]; then
-      fail "missing: ${path#"$TARGET_DIR"/}"
+      fail "missing: ${path#\"$TARGET_DIR\"/}"
       return 1
     fi
     if ! printf '%s\n' "$content" | diff -q - "$path" >/dev/null 2>&1; then
-      fail "out of date: ${path#"$TARGET_DIR"/}"
+      fail "out of date: ${path#\"$TARGET_DIR\"/}"
       return 1
     fi
-    pass "current: ${path#"$TARGET_DIR"/}"
+    pass "current: ${path#\"$TARGET_DIR\"/}"
     return 0
   fi
   install -d -m 0755 "$(dirname "$path")"
   printf '%s\n' "$content" >"$path"
-  pass "wrote ${path#"$TARGET_DIR"/}"
+  pass "wrote ${path#\"$TARGET_DIR\"/}"
 }
 
 main() {
@@ -154,41 +154,31 @@ main() {
   info "source: ${POLICY_FILE}"
 
   local body
-  body="$(render_body | cat -s)"
+  body="$(render_body)"
   local rc=0
 
-  # Claude Code
-  write_if_changed "${TARGET_DIR}/CLAUDE.md" \
-    "${GEN_HEADER_MD}
+  local full_content
+  full_content="$(printf '%s\n\n%s' \"$GEN_HEADER_MD\" \"$body\" | cat -s)"
 
-${body}" || rc=1
+  # Claude Code
+  write_if_changed "${TARGET_DIR}/CLAUDE.md" "$full_content" || rc=1
 
   # Codex CLI and every other client that reads AGENTS.md
-  write_if_changed "${TARGET_DIR}/AGENTS.md" \
-    "${GEN_HEADER_MD}
-
-${body}" || rc=1
+  write_if_changed "${TARGET_DIR}/AGENTS.md" "$full_content" || rc=1
 
   # GitHub Copilot / VS Code AI extensions
-  write_if_changed "${TARGET_DIR}/.github/copilot-instructions.md" \
-    "${GEN_HEADER_MD}
-
-${body}" || rc=1
+  write_if_changed "${TARGET_DIR}/.github/copilot-instructions.md" "$full_content" || rc=1
 
   # Gemini CLI
-  write_if_changed "${TARGET_DIR}/GEMINI.md" \
-    "${GEN_HEADER_MD}
-
-${body}" || rc=1
+  write_if_changed "${TARGET_DIR}/GEMINI.md" "$full_content" || rc=1
 
   # Cursor rules (its own directory format)
-  write_if_changed "${TARGET_DIR}/.cursor/rules/devbox-policy.mdc" \
-    "---
+  write_if_changed "${TARGET_DIR}/.cursor/rules/devbox-policy.mdc" "---
 description: DevBox AI engineering policy (generated from ai/policies/policy.yaml)
 alwaysApply: true
 ---
 
-${body}" || rc=1
+$full_content" || rc=1
 
   printf '\n'
   if [ "$CHECK" = 1 ]; then
