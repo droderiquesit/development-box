@@ -128,24 +128,45 @@ esac
 
 # ---------------------------------------------------------------------------
 sect "ai/models"
-for f in models.yaml profiles.yaml routing.yaml router.yaml; do
+for f in models.yaml profiles.yaml routing.yaml; do
   yq -e '.' "ai/models/${f}" >/dev/null 2>&1 && ok "${f} parses" || no "${f} invalid"
 done
 
-# Every profile must name a provider that exists.
+# Profiles, routes and agents name ROLES; every role-based backend must define
+# each role used, or switching backend (`ai use`) would break that profile.
+defprov="$(yq -r '.default_provider' ai/models/models.yaml)"
+yq -e ".providers.${defprov}.enabled" ai/models/models.yaml >/dev/null 2>&1 &&
+  ok "default provider '${defprov}' is enabled" || no "default provider '${defprov}' missing or disabled"
+mapfile -t backends < <(yq -r '.providers | to_entries | .[] | select(.value.enabled and .value.aliases.coder) | .key' ai/models/models.yaml)
+check_role() { # check_role <where> <role>
+  local where="$1" role="$2" b
+  [ -n "$role" ] && [ "$role" != null ] || return 0
+  for b in "${backends[@]}"; do
+    yq -e ".providers.${b}.aliases.\"${role}\"" ai/models/models.yaml >/dev/null 2>&1 ||
+      { no "${where}: role '${role}' not defined by backend ${b}"; return; }
+  done
+  ok "${where} → ${role}"
+}
 while IFS= read -r prof; do
   [ -n "$prof" ] || continue
-  prov="$(yq -r ".profiles.${prof}.provider" ai/models/profiles.yaml)"
-  if yq -e ".providers.${prov}" ai/models/models.yaml >/dev/null 2>&1; then
-    ok "profile ${prof} → provider ${prov}"
-  else
-    no "profile ${prof} references unknown provider '${prov}'"
-  fi
+  check_role "profile ${prof}" "$(yq -r ".profiles.${prof}.model" ai/models/profiles.yaml)"
+  check_role "profile ${prof} reviewer" "$(yq -r ".profiles.${prof}.reviewer" ai/models/profiles.yaml)"
   # And an MCP trust profile that exists.
   mprof="$(yq -r ".profiles.${prof}.mcp_profile" ai/models/profiles.yaml)"
   yq -e ".profiles.${mprof}" mcp/profiles.yaml >/dev/null 2>&1 \
     || no "profile ${prof} references unknown MCP trust profile '${mprof}'"
 done < <(yq -r '.profiles | keys | .[]' ai/models/profiles.yaml 2>/dev/null)
+while IFS=$'\t' read -r task primary reviewer tprof; do
+  check_role "route ${task}" "$primary"
+  check_role "route ${task} reviewer" "$reviewer"
+  [ "$tprof" = null ] || yq -e ".profiles.\"${tprof}\"" ai/models/profiles.yaml >/dev/null 2>&1 ||
+    no "route ${task} references unknown profile '${tprof}'"
+done < <(yq -r '.routing | to_entries | .[] | [.key, .value.primary, (.value.reviewer // "null"), (.value.profile // "null")] | @tsv' ai/models/routing.yaml)
+for f in ai/agents/*-agent.md; do
+  check_role "agent $(basename "$f" .md)" "$(awk '/^model:/{print $2; exit}' "$f")"
+  ap="$(awk '/^profile:/{print $2; exit}' "$f")"
+  yq -e ".profiles.\"${ap}\"" ai/models/profiles.yaml >/dev/null 2>&1 || no "agent $(basename "$f") references unknown profile '${ap}'"
+done
 
 # The default profile must exist.
 defp="$(yq -r '.default' ai/models/profiles.yaml)"

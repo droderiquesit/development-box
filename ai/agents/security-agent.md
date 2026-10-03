@@ -1,8 +1,8 @@
 ---
 name: security-agent
 profile: code-review
-model: claude
-reviewer: codex
+model: coder
+reviewer: review
 mcp_servers: [filesystem, git, github]
 permissions: {read: [/workspace], write: [], execute: SAFE}
 rules: [secrets, terraform, cloud, kubernetes, engineering]

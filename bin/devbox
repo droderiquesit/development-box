@@ -242,11 +242,10 @@ cmd_doctor() {
   fi
 
   [ "$DOCTOR_QUIET" = 1 ] || head2 "AI platform"
+  check "Hermes" required hermes --version
   check "Claude Code" required claude --version
-  check "Codex" required codex --version
   check "Gemini CLI" optional gemini --version
-  check "llm" optional llm --version
-  check "LiteLLM" optional litellm --version
+  check "Codex" optional codex --version
   doctor_ai_config
 
   [ "$DOCTOR_QUIET" = 1 ] || head2 "MCP"
@@ -408,9 +407,10 @@ cmd_versions() {
   vrow go "$(yqr '.languages.go' "$DEVBOX_VERSION_FILE")" "$(go version 2>/dev/null | awk '{print $3}')"
   vrow node "$(yqr '.languages.node_major' "$DEVBOX_VERSION_FILE").x" "$(installed_version node --version)"
   vrow python "$(yqr '.languages.python' "$DEVBOX_VERSION_FILE")" "$(installed_version python3 --version)"
-  head2 "Channel-pinned (updated by \`devbox update ai\`)"
+  head2 "AI clients"
+  vrow hermes "$(yqr '.ai.hermes' "$DEVBOX_VERSION_FILE")" "$(hermes --version 2>/dev/null | awk 'NR==1{print $3}')"
   vrow claude "$(yqr '.ai.claude_code' "$DEVBOX_VERSION_FILE")" "$(installed_version claude --version)"
-  vrow codex "$(yqr '.ai.codex' "$DEVBOX_VERSION_FILE")" "$(installed_version codex --version)"
+  vrow gemini "$(yqr '.ai.gemini_cli' "$DEVBOX_VERSION_FILE")" "$(installed_version gemini --version)"
   printf '\n'
 }
 
@@ -418,8 +418,8 @@ cmd_update() {
   local what="${1:-all}"
   case "$what" in
     ai | all)
-      head2 "Updating AI clients (channel-pinned)"
-      npm install -g --no-fund --no-audit @anthropic-ai/claude-code@latest @openai/codex@latest || warned "npm update failed"
+      head2 "Updating AI clients in place (the image pins exact versions; rebuild to make it stick)"
+      npm install -g --no-fund --no-audit @anthropic-ai/claude-code@latest @google/gemini-cli@latest || warned "npm update failed"
       audit_log update "ai clients"
       ;;&
     mcp | all)

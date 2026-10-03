@@ -159,39 +159,40 @@ cloud:
 # -----------------------------------------------------------------------------
 # AI clients
 # -----------------------------------------------------------------------------
-# Channel-pinned on purpose: these ship several releases per week and an exact
-# pin here goes stale within days. `devbox update ai` re-resolves the channel and
-# `devbox versions` always reports the resolved version. Pin exactly by replacing
-# "latest" with a version string if your change-control process requires it.
+# Exact pins, so a rebuild produces the same image. Renovate proposes bumps
+# (the `# renovate:` comments); `devbox update ai` still upgrades in place.
 ai:
-  claude_code: "latest"      # npm @anthropic-ai/claude-code
-  codex: "latest"            # npm @openai/codex
-  gemini_cli: "latest"       # npm @google/gemini-cli
-  # renovate: datasource=pypi depName=litellm
-  litellm: "1.97.0"          # uv tool (PyPI) — model router, exact pin
-  # renovate: datasource=pypi depName=llm
-  llm: "0.32"                # uv tool (PyPI) — scriptable one-shot prompts
+  # renovate: datasource=github-tags depName=NousResearch/hermes-agent
+  hermes: "v2026.9.24"       # git tag, installed with `uv sync --locked`
+  hermes_commit: "f97608f178d1ffeca59860195ab7da295f7c8e5f"  # tag must resolve here
+  # renovate: datasource=npm depName=@anthropic-ai/claude-code
+  claude_code: "2.1.288"     # npm — runs free against Ollama's Anthropic API
+  # renovate: datasource=npm depName=@google/gemini-cli
+  gemini_cli: "0.62.0"       # npm — free-tier fallback
   # OPTIONAL, off by default (FEATURE_AI_EXTRA):
+  # renovate: datasource=npm depName=@openai/codex
+  codex: "0.160.0"           # npm
   # renovate: datasource=pypi depName=aider-chat
   aider: "0.86.2"            # uv tool (PyPI)
-  opencode: "latest"         # npm opencode-ai
+  # renovate: datasource=npm depName=opencode-ai
+  opencode: "1.18.34"        # npm
 
 # -----------------------------------------------------------------------------
 # MCP servers (installed only when enabled in mcp/servers.yaml)
 # -----------------------------------------------------------------------------
 mcp:
-  filesystem: "latest"       # npm @modelcontextprotocol/server-filesystem
-  memory: "latest"           # npm @modelcontextprotocol/server-memory
-  sequential_thinking: "latest"  # npm @modelcontextprotocol/server-sequential-thinking
+  filesystem: "2026.8.31"       # npm @modelcontextprotocol/server-filesystem
+  memory: "2026.8.31"           # npm @modelcontextprotocol/server-memory
+  sequential_thinking: "2026.8.31"  # npm @modelcontextprotocol/server-sequential-thinking
   # renovate: datasource=pypi depName=mcp-server-git
   git: "2026.7.10"           # uv tool (PyPI) mcp-server-git
   # renovate: datasource=pypi depName=mcp-server-fetch
   fetch: "2026.7.10"         # uv tool (PyPI) mcp-server-fetch
   # renovate: datasource=pypi depName=mcp-server-time
   time: "2026.7.10"          # uv tool (PyPI) mcp-server-time
-  context7: "latest"         # npm @upstash/context7-mcp — library docs
-  playwright: "latest"       # npm @playwright/mcp — browser research (OPTIONAL)
-  kubernetes: "latest"       # npm kubernetes-mcp-server (OPTIONAL)
+  context7: "4.1.1"         # npm @upstash/context7-mcp — library docs
+  playwright: "0.0.83"       # npm @playwright/mcp — browser research (OPTIONAL)
+  kubernetes: "0.0.67"       # npm kubernetes-mcp-server (OPTIONAL)
   # github + terraform MCP servers run as OCI containers, not in-image binaries:
-  github_image: "ghcr.io/github/github-mcp-server:latest"
-  terraform_image: "docker.io/hashicorp/terraform-mcp-server:latest"
+  github_image: "ghcr.io/github/github-mcp-server:v1.14.0"
+  terraform_image: "docker.io/hashicorp/terraform-mcp-server:1.3.0"

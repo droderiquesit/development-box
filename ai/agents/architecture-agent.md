@@ -1,9 +1,9 @@
 ---
 name: architecture-agent
-profile: architecture
-model: claude-deep
-reviewer: gemini
-mcp_servers: [filesystem, git, github, fetch, context7, sequential-thinking]
+profile: deep
+model: architect
+reviewer: review
+mcp_servers: [filesystem, git, github, fetch, context7]
 permissions: {read: [/workspace], write: [/workspace/docs], execute: SAFE}
 rules: [engineering, secrets, cloud]
 ---

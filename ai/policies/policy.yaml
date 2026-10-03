@@ -82,9 +82,7 @@ execution:
   enforcement: HARD          # via each client's permission/allow-deny config
   default: APPROVAL_REQUIRED # anything not matched below needs a human
 
-  # Now SAFE to allow autonomous pushes to feature branches
   SAFE:
-    - "git push*"
     - "git status"
     - "git diff*"
     - "git log*"
@@ -104,6 +102,18 @@ execution:
     - "rg*"
     - "fd*"
     - "jq*"
+    # read-only filters, so `git log | head` stays SAFE
+    - "head*"
+    - "tail*"
+    - "grep*"
+    - "wc*"
+    - "sort*"
+    - "uniq*"
+    - "cut*"
+    - "graphify query*"
+    - "graphify explain*"
+    - "graphify path*"
+    - "graphify affected*"
     - "yq*"
     - "terraform fmt*"
     - "terraform validate*"
@@ -174,6 +184,7 @@ execution:
     - "ruff format*"
 
   APPROVAL_REQUIRED:
+    - "git push*"                # public repo: a human confirms every push
     - "terraform apply*"
     - "tofu apply*"
     - "terragrunt apply*"
@@ -362,9 +373,15 @@ engineering:
 tooling:
   enforcement: SOFT
   rules:
-    - "Navigate code with the language server (definition, references, hover) before grep or whole-file reads: pyright for Python, typescript-language-server for TS/JS, rust-analyzer for Rust."
+    - >-
+      Navigate code with the language server (definition, references, hover)
+      before grep or whole-file reads: pyright for Python,
+      typescript-language-server for TS/JS, rust-analyzer for Rust.
     - "After editing Python, TypeScript or Rust, check LSP diagnostics and fix any new errors before moving on."
-    - "If `graphify-out/graph.json` exists, answer structure questions with `graphify query`, `graphify explain` or `graphify affected` before exploring files. Run `graphify update .` after structural changes."
+    - >-
+      If `graphify-out/graph.json` exists, answer structure questions with
+      `graphify query`, `graphify explain` or `graphify affected` before
+      exploring files. Run `graphify update .` after structural changes.
     - "Shell output may be compressed by rtk. When exact raw output matters, run `rtk proxy <cmd>`."
     - "Read only what you need: search with `rg -n`, then read line ranges. Never re-read a file you just wrote or reproduce file contents in your reply."
     - "Delegate broad searches to a subagent and keep only its conclusion."

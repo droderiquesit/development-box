@@ -1,0 +1,20 @@
+#!/bin/bash
+# =============================================================================
+# devbox-models startup script — rendered by Terraform (compute.tf).
+# This header carries the per-model settings; the logic below it is the
+# static file templates/startup.sh. Nothing secret is rendered here: the API
+# key is read from Secret Manager at boot.
+# =============================================================================
+MODEL_KEY='${model_key}'
+PROJECT_ID='${project_id}'
+SECRET_ID='${secret_id}'
+VLLM_IMAGE='${vllm_image}'
+VLLM_PORT='${vllm_port}'
+MAX_MODEL_LEN='${max_model_len}'
+VLLM_ARGS_B64='${vllm_args_b64}'
+VLLM_ENV_B64='${vllm_env_b64}'
+WEIGHTS_URI='${weights_uri}'
+IDLE_SHUTDOWN_MINUTES='${idle_shutdown_minutes}'
+MAX_RUN_HOURS='${max_run_hours}'
+STARTUP_TIMEOUT_MINUTES='${startup_timeout_minutes}'
+START_ON_CREATE='${start_on_create}'

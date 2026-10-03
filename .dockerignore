@@ -9,6 +9,8 @@ tests
 !README.md
 .vscode
 .devcontainer
+# Host bind mount for /workspace — user projects, never image content.
+workspace
 **/.terraform
 **/.terraform.lock.hcl
 **/node_modules

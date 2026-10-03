@@ -1,0 +1,433 @@
+---
+# =============================================================================
+# gcp-models — CI/CD for infra/gcp-models (self-hosted models on GCE H200s).
+# =============================================================================
+#   validate        every run: fmt, validate, tflint, checkov, trivy, shellcheck
+#   plan            when GCP is configured: read-only identity (devbox-models-plan)
+#   apply           push to main / dispatch apply, AFTER a human approves the
+#                   `gcp-models` environment (required reviewers). This is the
+#                   human gate the repository policy requires for apply.
+#   stage-weights   dispatch only: stream one model's pinned HF revision into
+#                   the weights bucket (8 parallel shards + verify), also
+#                   behind the `gcp-models` environment.
+#
+# Authentication is Workload Identity Federation only — no JSON keys. Until
+# bootstrap.sh has run and the repository variables exist, the cloud jobs
+# skip with a notice instead of failing.
+#
+# Every third-party action is pinned to a full commit SHA.
+name: gcp-models
+
+"on":
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/gcp-models/**'
+      - '.github/workflows/gcp-models.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infra/gcp-models/**'
+      - '.github/workflows/gcp-models.yml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'plan, apply (needs environment approval) or stage-weights'
+        type: choice
+        options: [plan, apply, stage-weights]
+        default: plan
+      model:
+        description: 'Model key for stage-weights'
+        type: choice
+        options: [architect, coder, fast]
+        default: coder
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash            # bash -eo pipefail; the default `bash -e` has no pipefail
+
+env:
+  TF_DIR: infra/gcp-models
+  TF_IN_AUTOMATION: '1'
+  TF_INPUT: '0'
+  TF_STATE_PREFIX: gcp-models
+
+concurrency:
+  group: gcp-models-${{ github.ref }}-${{ inputs.action || github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+
+  validate:
+    name: validate
+    if: inputs.action != 'stage-weights'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: tool pins from versions.yaml
+        id: pins
+        run: |
+          set -euo pipefail
+          pin() { # pin <section> <key>
+            awk -v sec="$1:" -v key="  $2:" '
+              $0 == sec {s=1; next}
+              s && index($0, key) == 1 {gsub(/.*: *"?|".*/, ""); print; exit}
+              s && /^[a-z]/ {exit}' versions.yaml
+          }
+          for k in terraform tflint checkov; do
+            v="$(pin iac "$k")"
+            [ -n "$v" ] || { echo "::error::versions.yaml iac.$k not found"; exit 1; }
+            echo "$k=$v" >> "$GITHUB_OUTPUT"
+            echo "$k $v"
+          done
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ steps.pins.outputs.terraform }}
+          terraform_wrapper: false
+
+      - uses: ./.github/actions/go-tools
+        with:
+          tools: github.com/terraform-linters/tflint@${{ steps.pins.outputs.tflint }}
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - uses: ./.github/actions/trivy
+
+      - name: terraform fmt
+        run: terraform -chdir="$TF_DIR" fmt -check -recursive -diff
+
+      - name: terraform validate
+        run: |
+          terraform -chdir="$TF_DIR" init -backend=false
+          terraform -chdir="$TF_DIR" validate
+
+      - name: terraform test (mocked google provider)
+        run: terraform -chdir="$TF_DIR" test
+
+      - name: tflint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # plugin download, avoids API rate limits
+        run: |
+          cd "$TF_DIR"
+          tflint --init
+          tflint --format compact
+
+      - name: checkov
+        env:
+          CHECKOV_VERSION: ${{ steps.pins.outputs.checkov }}
+        run: |
+          pip install --quiet "checkov==${CHECKOV_VERSION}"
+          checkov -d "$TF_DIR" --framework terraform --compact --quiet
+
+      - name: trivy config
+        run: trivy config --exit-code 1 --severity MEDIUM,HIGH,CRITICAL "$TF_DIR"
+
+      - name: shellcheck
+        run: |
+          shellcheck -S style "$TF_DIR/bootstrap.sh" "$TF_DIR/stage-weights.sh" "$TF_DIR/templates/startup.sh"
+
+  plan:
+    name: plan
+    needs: validate
+    if: inputs.action != 'stage-weights'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write       # Workload Identity Federation
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+      changes: ${{ steps.plan.outputs.changes }}
+    steps:
+      - name: is GCP configured?
+        id: gate
+        env:
+          WIF: ${{ vars.GCP_WIF_PROVIDER }}
+          SA: ${{ vars.GCP_PLAN_SA }}
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          BUCKET: ${{ vars.GCP_TF_STATE_BUCKET }}
+        run: |
+          if [ -n "$WIF" ] && [ -n "$SA" ] && [ -n "$PROJECT" ] && [ -n "$BUCKET" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            msg="GCP is not configured (GCP_WIF_PROVIDER, GCP_PLAN_SA, GCP_PROJECT_ID, GCP_TF_STATE_BUCKET)."
+            msg="$msg Run infra/gcp-models/bootstrap.sh and set the repository variables it prints. Skipping plan/apply."
+            echo "::notice title=gcp-models::$msg"
+            echo "GCP not configured — plan skipped. See docs/gcp-models.md." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.enabled == 'true'
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_PLAN_SA }}
+
+      - name: terraform version
+        if: steps.gate.outputs.enabled == 'true'
+        id: tfver
+        run: |
+          v="$(awk '/^iac:/{s=1;next} s&&/^  terraform:/{gsub(/.*: *"?|".*/,"");print;exit}' versions.yaml)"
+          echo "v=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          terraform_version: ${{ steps.tfver.outputs.v }}
+          terraform_wrapper: false
+
+      - name: variables from repository variables
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          IAP_MEMBERS: ${{ vars.GCP_IAP_MEMBERS }}
+          BILLING_ACCOUNT: ${{ vars.GCP_BILLING_ACCOUNT }}
+          BUDGET: ${{ vars.GCP_MONTHLY_BUDGET_USD }}
+          BUDGET_EMAILS: ${{ vars.GCP_BUDGET_EMAILS }}
+        run: |
+          # Values go through the environment and json.dumps, never through
+          # shell interpolation.
+          python3 - > "$TF_DIR/ci.auto.tfvars.json" <<'PY'
+          import json, os
+          def lst(name):
+              raw = os.environ.get(name, "").strip()
+              return json.loads(raw) if raw else []
+          print(json.dumps({
+              "project_id": os.environ["PROJECT"],
+              "iap_tunnel_members": lst("IAP_MEMBERS"),
+              "billing_account_id": os.environ.get("BILLING_ACCOUNT", ""),
+              "monthly_budget_usd": float(os.environ.get("BUDGET") or 0),
+              "budget_alert_emails": lst("BUDGET_EMAILS"),
+          }, indent=2))
+          PY
+          cat "$TF_DIR/ci.auto.tfvars.json"
+
+      - name: terraform plan
+        if: steps.gate.outputs.enabled == 'true'
+        id: plan
+        env:
+          STATE_BUCKET: ${{ vars.GCP_TF_STATE_BUCKET }}
+        run: |
+          cd "$TF_DIR"
+          terraform init -backend-config="bucket=${STATE_BUCKET}" -backend-config="prefix=${TF_STATE_PREFIX}"
+          set +e
+          terraform plan -lock-timeout=5m -detailed-exitcode -out=tfplan
+          rc=$?
+          set -e
+          case "$rc" in
+            0) echo "changes=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "changes=true" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
+          {
+            echo "## terraform plan — infra/gcp-models"
+            echo
+            echo '```'
+            terraform show -no-color tfplan | tail -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.plan.outputs.changes == 'true'
+        with:
+          name: gcp-models-tfplan
+          path: ${{ env.TF_DIR }}/tfplan
+          retention-days: 5
+
+  apply:
+    name: apply
+    needs: plan
+    if: >-
+      needs.plan.outputs.enabled == 'true' && needs.plan.outputs.changes == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.action == 'apply'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: gcp-models    # required reviewers = the human approval gate
+    concurrency:
+      group: gcp-models-apply
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - name: terraform version
+        id: tfver
+        run: |
+          v="$(awk '/^iac:/{s=1;next} s&&/^  terraform:/{gsub(/.*: *"?|".*/,"");print;exit}' versions.yaml)"
+          echo "v=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ steps.tfver.outputs.v }}
+          terraform_wrapper: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: gcp-models-tfplan
+          path: ${{ env.TF_DIR }}
+
+      # Applies exactly the plan that was reviewed. A saved plan never
+      # prompts, and is refused if the state moved since it was made.
+      - name: terraform apply (saved plan)
+        env:
+          STATE_BUCKET: ${{ vars.GCP_TF_STATE_BUCKET }}
+        run: |
+          cd "$TF_DIR"
+          terraform init -backend-config="bucket=${STATE_BUCKET}" -backend-config="prefix=${TF_STATE_PREFIX}"
+          terraform apply -lock-timeout=5m tfplan
+          {
+            echo "## terraform apply — infra/gcp-models"
+            echo '```'
+            terraform output -no-color
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Weight staging: Hugging Face -> gs://<project>-devbox-model-weights
+  # ---------------------------------------------------------------------------
+  stage-resolve:
+    name: stage-weights (resolve)
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'stage-weights'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+      repo: ${{ steps.resolve.outputs.repo }}
+      revision: ${{ steps.resolve.outputs.revision }}
+      bucket: ${{ steps.resolve.outputs.bucket }}
+    steps:
+      - name: is GCP configured?
+        id: gate
+        env:
+          WIF: ${{ vars.GCP_WIF_PROVIDER }}
+          SA: ${{ vars.GCP_STAGE_SA }}
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          if [ -n "$WIF" ] && [ -n "$SA" ] && [ -n "$PROJECT" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=gcp-models::GCP is not configured (GCP_WIF_PROVIDER, GCP_STAGE_SA, GCP_PROJECT_ID). Skipping stage-weights."
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.enabled == 'true'
+
+      - name: terraform version
+        if: steps.gate.outputs.enabled == 'true'
+        id: tfver
+        run: |
+          v="$(awk '/^iac:/{s=1;next} s&&/^  terraform:/{gsub(/.*: *"?|".*/,"");print;exit}' versions.yaml)"
+          echo "v=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          terraform_version: ${{ steps.tfver.outputs.v }}
+          terraform_wrapper: false
+
+      # The models map in variables.tf is the single source of truth for
+      # repo + revision. A local-backend override lets `terraform console`
+      # evaluate it without touching the real state.
+      - name: resolve repo and revision from variables.tf
+        if: steps.gate.outputs.enabled == 'true'
+        id: resolve
+        env:
+          MODEL: ${{ inputs.model }}
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$MODEL" =~ ^[a-z][a-z0-9-]{0,20}$ ]] || { echo "::error::bad model key"; exit 1; }
+          cd "$TF_DIR"
+          printf 'terraform {\n  backend "local" {}\n}\n' > ci_backend_override.tf
+          terraform init -input=false >/dev/null
+          out="$(echo "jsonencode({repo = var.models[\"${MODEL}\"].hf_repo, revision = var.models[\"${MODEL}\"].hf_revision})" |
+            terraform console -var "project_id=${PROJECT}")"
+          rm -f ci_backend_override.tf
+          python3 - "$out" "$PROJECT" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          m = json.loads(json.loads(sys.argv[1]))
+          print(f"repo={m['repo']}")
+          print(f"revision={m['revision']}")
+          print(f"bucket={sys.argv[2]}-devbox-model-weights")
+          PY
+          tail -3 "$GITHUB_OUTPUT"
+
+  stage:
+    name: stage-weights (shard ${{ matrix.shard }})
+    needs: stage-resolve
+    if: needs.stage-resolve.outputs.enabled == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    environment: gcp-models
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_STAGE_SA }}
+
+      - name: stream shard to GCS
+        env:
+          REPO: ${{ needs.stage-resolve.outputs.repo }}
+          REVISION: ${{ needs.stage-resolve.outputs.revision }}
+          BUCKET: ${{ needs.stage-resolve.outputs.bucket }}
+          SHARD: ${{ matrix.shard }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}   # optional; public repos work without it
+        run: |
+          "$TF_DIR/stage-weights.sh" --repo "$REPO" --revision "$REVISION" \
+            --bucket "$BUCKET" --shard "$SHARD" --shards 8
+
+  stage-finalize:
+    name: stage-weights (verify + mark)
+    needs: [stage-resolve, stage]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: gcp-models
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_STAGE_SA }}
+
+      - name: verify every file and write .devbox-staged
+        env:
+          REPO: ${{ needs.stage-resolve.outputs.repo }}
+          REVISION: ${{ needs.stage-resolve.outputs.revision }}
+          BUCKET: ${{ needs.stage-resolve.outputs.bucket }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          "$TF_DIR/stage-weights.sh" --repo "$REPO" --revision "$REVISION" --bucket "$BUCKET" --finalize
+          echo "Staged ${REPO}@${REVISION} to gs://${BUCKET}/${REPO}/${REVISION}" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,8 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+# Generated in CI from repository variables; never committed.
+ci.auto.tfvars.json
+# .terraform.lock.hcl is deliberately COMMITTED (pins provider builds).
+ci_backend_override.tf

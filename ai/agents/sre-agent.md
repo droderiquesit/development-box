@@ -1,8 +1,8 @@
 ---
 name: sre-agent
 profile: code-review
-model: claude
-reviewer: codex
+model: coder
+reviewer: review
 mcp_servers: [filesystem, git, github, fetch]
 permissions: {read: [/workspace], write: [/workspace/docs], execute: SAFE}
 rules: [kubernetes, cloud, engineering]

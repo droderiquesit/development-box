@@ -1,7 +1,7 @@
 ---
 name: github-agent
 profile: balanced
-model: claude
+model: coder
 reviewer: null
 mcp_servers: [filesystem, git, github]
 permissions: {read: [/workspace], write: [/workspace/.github], execute: REVIEW_REQUIRED}

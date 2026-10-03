@@ -3,7 +3,7 @@
 # CI — fast checks on every push and pull request.
 # =============================================================================
 # Everything here must finish in a couple of minutes. Image builds live in
-# build-base.yml / build-devbox.yml so that a typo in a markdown file does not
+# build-devbox.yml / release.yml so that a typo in a markdown file does not
 # cost twenty minutes of runner time.
 #
 # Every tool is installed through .github/actions/go-tools, which restores
@@ -33,6 +33,10 @@ defaults:
   run:
     shell: bash
 
+# Makes .github/scripts/lint.sh fail on a missing tool instead of skipping it.
+env:
+  LINT_STRICT: '1'
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -50,21 +54,16 @@ jobs:
         with:
           tools: mvdan.cc/sh/v3/cmd/shfmt@v3.12.0
 
+      # The checks themselves live in .github/scripts/lint.sh, which `make lint`
+      # and `task lint` also run — one definition, so local and CI cannot drift.
       - name: shellcheck
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends shellcheck
-          mapfile -t files < <(find bin scripts tests -type f \
-            \( -name '*.sh' -o -name devbox -o -name ai -o -name mcp \) 2>/dev/null)
-          printf 'checking %d files\n' "${#files[@]}"
-          shellcheck -x -S warning "${files[@]}"
+          .github/scripts/lint.sh shellcheck
 
       - name: shfmt
-        run: |
-          shfmt -d -i 2 -ci bin scripts config/shell || {
-            echo "::error::shell formatting differs — run: shfmt -w -i 2 -ci bin scripts config/shell"
-            exit 1
-          }
+        run: .github/scripts/lint.sh shfmt
 
   lint-config:
     name: yaml / json / actions
@@ -86,10 +85,10 @@ jobs:
       - name: yamllint
         run: |
           pip install --quiet -r .github/requirements-ci.txt
-          yamllint -c config/tools/yamllint.yaml .
+          .github/scripts/lint.sh yamllint
 
       - name: actionlint
-        run: actionlint -color
+        run: .github/scripts/lint.sh actionlint
 
       - name: JSONC configuration parses
         run: |
@@ -190,10 +189,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: markdownlint
         run: |
-          # Rule configuration lives in .markdownlint.yaml so that this and the
+          # Rule configuration lives in .markdownlint.json so that this and the
           # pre-commit hook and a developer's editor all apply the same rules.
           # It used to be passed as --disable flags here, which meant CI failed
           # on rules that were green locally.
           npm ci --prefix .github/tooling --no-audit --no-fund
-          node .github/tooling/node_modules/.bin/markdownlint \
-            '**/*.md' --ignore node_modules --ignore .github/tooling
+          .github/scripts/lint.sh markdownlint

@@ -238,3 +238,8 @@ config/ca-certificates/*.pem
 
 # graphify knowledge graph output (local index; repo is public)
 graphify-out/
+
+# The default host bind mount for /workspace (see compose.yaml). It holds the
+# developer's own projects — often another clone of this repository — and is
+# never part of this one.
+/workspace/

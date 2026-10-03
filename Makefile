@@ -32,6 +32,7 @@ TAG           ?= latest
 # base patching mechanism; nothing here needs to change.
 BASE_IMAGE    ?= $(shell awk '/^base:/{r=1;next} r&&/^  repo:/{gsub(/.*: *"?|"$$/,"");print;exit} r&&/^[^ ]/{exit}' versions.yaml)
 BASE_VERSION  ?= $(shell awk '/^base:/{r=1;next} r&&/^  version:/{gsub(/[ \t]+\#.*$$/,"");gsub(/.*: *"?|"$$/,"");print;exit} r&&/^[^ ]/{exit}' versions.yaml)
+BASE_DIGEST   ?= $(shell awk '/^base:/{r=1;next} r&&/^  digest:/{gsub(/[ \t]+\#.*$$/,"");sub(/^[^:]*: *"?/,"");sub(/"$$/,"");print;exit} r&&/^[^ ]/{exit}' versions.yaml)
 
 VCS_REF       := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -41,7 +42,7 @@ VERSION       ?= $(shell git describe --tags --always --dirty 2>/dev/null || ech
 #   make build FEATURE_CLOUD_AWS=1 FEATURE_CLOUD_AZURE=1
 FEATURE_CLOUD_AWS      ?= 0
 FEATURE_CLOUD_AZURE    ?= 0
-FEATURE_CLOUD_GCP      ?= 0
+FEATURE_CLOUD_GCP      ?= 1
 FEATURE_K8S_LOCAL      ?= 0
 FEATURE_AI_GEMINI      ?= 1
 FEATURE_AI_EXTRA       ?= 0
@@ -89,14 +90,22 @@ build: pull-base build-devbox ## Build the DevBox on the pinned, published base
 
 .PHONY: pull-base
 pull-base: ## Pull the pinned base image release from the registry
-	@echo "base pinned to $(BASE_VERSION) by versions.yaml"
-	$(ENGINE) pull $(BASE_REF) || { \
-	  echo ""; \
-	  echo "could not pull $(BASE_REF)."; \
-	  echo "  * private registry? $(ENGINE) login $(REGISTRY)"; \
-	  echo "  * missing release? it is published by the Base Image Factory repo"; \
-	  exit 1; \
-	}
+	@echo "base pinned to $(BASE_VERSION) ($(BASE_DIGEST)) by versions.yaml"
+	@# The digest is the pin; a local copy with that digest is the same bytes,
+	@# so skip the registry (offline builds, expired ghcr credentials).
+	@if $(ENGINE) image exists $(BASE_IMAGE)@$(BASE_DIGEST); then \
+	  echo "pinned base already present locally"; \
+	else \
+	  $(ENGINE) pull $(BASE_REF) || { \
+	    echo ""; \
+	    echo "could not pull $(BASE_REF)."; \
+	    echo "  * private registry? $(ENGINE) login $(REGISTRY)"; \
+	    echo "  * missing release? it is published by the Base Image Factory repo"; \
+	    exit 1; \
+	  }; \
+	  $(ENGINE) image exists $(BASE_IMAGE)@$(BASE_DIGEST) || { \
+	    echo "pulled $(BASE_REF) but its digest is not the pinned $(BASE_DIGEST)"; exit 1; }; \
+	fi
 
 .PHONY: build-base
 build-base: ## (moved) The base image is built by the Base Image Factory repo
@@ -109,7 +118,8 @@ build-base: ## (moved) The base image is built by the Base Image Factory repo
 .PHONY: build-devbox
 build-devbox: ## Build the DevBox image on $(BASE_REF)
 	$(ENGINE) build -f Containerfile -t $(DEVBOX_REF) \
-	  --build-arg BASE_IMAGE_REF=$(BASE_REF) $(COMMON_ARGS) $(FEATURE_ARGS) .
+	  --build-arg BASE_IMAGE_REF=$(BASE_REF) --build-arg BASE_IMAGE_DIGEST=$(BASE_DIGEST) \
+	  $(COMMON_ARGS) $(FEATURE_ARGS) .
 
 .PHONY: pull
 pull: ## Pull the published DevBox image instead of building it
@@ -127,10 +137,6 @@ build-all-clouds: ## Build with every cloud CLI enabled (large image)
 .PHONY: up
 up: ## Start the DevBox with compose
 	$(ENGINE) compose up -d devbox
-
-.PHONY: up-full
-up-full: ## Start the DevBox + model router + local model runtime
-	$(ENGINE) compose --profile full up -d
 
 .PHONY: down
 down: ## Stop the stack (volumes are kept)
@@ -160,14 +166,10 @@ doctor: ## Run `devbox doctor` inside a throwaway container
 test: lint test-image ## Run every check
 
 .PHONY: lint
-lint: ## Lint this repository (shell, YAML, workflows)
-	@echo "── shellcheck ──"
-	@shellcheck -x -S warning $$(find bin scripts tests -type f \( -name '*.sh' -o -name devbox -o -name ai -o -name mcp \) 2>/dev/null) || exit 1
-	@echo "── yamllint ──"
-	@yamllint -c config/tools/yamllint.yaml . || exit 1
-	@echo "── actionlint ──"
-	@actionlint || exit 1
-	@echo "all lint checks passed"
+lint: ## Lint this repository — the same checks, flags and configs as CI (ci.yml)
+	@# One definition shared with ci.yml and Taskfile.yml. Tools missing
+	@# locally are skipped with a warning; LINT_STRICT=1 makes that fatal.
+	.github/scripts/lint.sh all
 
 .PHONY: test-image
 test-image: ## Run the image test suite against $(DEVBOX_REF)

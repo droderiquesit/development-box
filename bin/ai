@@ -31,7 +31,6 @@ ASKING
   ai ask "question"         one-shot question, routed by the active profile
   ai ask "q" --task NAME    route by task type (see ai/models/routing.yaml)
   ai ask "q" --model M      explicit override, always available
-  ai chat                   start an interactive session (execs the native CLI)
 
 REVIEW AND WORKFLOWS
   ai review <target>        target: terraform | github-actions | security | code
@@ -45,12 +44,22 @@ LIBRARY
   ai agent <role>           start a session in an agent role
   ai list                   prompts, agents, profiles and workflows
 
+SELF-HOSTED MODELS (GPUs in your GCP project — docs/gcp-models.md)
+  ai up [role...]           start VM(s), open IAP tunnel(s), wait until ready
+  ai down [role...]         close tunnels and stop VM(s) (ends GPU billing)
+  ai status                 VM / tunnel / API state per role
+
+AGENTS
+  ai chat                   the primary agent (Hermes) on the active backend
+  ai claude [args]          Claude Code on the active backend's open models
+  ai quota                  Ollama Cloud backend: is the free allowance usable?
+
 CONFIG
   ai sync [--check]         regenerate client instruction files from the
                             canonical policy (CLAUDE.md, AGENTS.md, ...)
   ai doctor                 AI-specific health check
 
-The native CLIs remain fully available: run `claude`, `codex` or `gemini`.
+The native CLIs remain fully available: run `hermes`, `claude` or `gemini`.
 EOF
 }
 
@@ -63,7 +72,9 @@ profile_field() { yqr ".profiles.$(active_profile).$1" "$PROFILES_FILE" "${2:-}"
 # The active provider is either explicitly chosen with `ai use`, or inherited
 # from the active profile. Explicit always wins — a wrapper that silently
 # overrides what you asked for is worse than no wrapper.
-active_provider() { state_get active-provider "$(profile_field provider anthropic)"; }
+active_provider() {
+  state_get active-provider "$(profile_field provider "$(yqr '.default_provider' "$MODELS_FILE" selfhosted)")"
+}
 active_model() { state_get active-model "$(profile_field model '')"; }
 
 # Resolve an alias (claude, gpt, gemini, local) to a concrete model id.
@@ -76,6 +87,12 @@ resolve_alias() {
 # Which provider owns an alias? Lets `ai use claude` work without a provider.
 provider_for_alias() {
   local alias="$1" p
+  # Roles (coder, architect, ...) exist on every backend: the active one wins.
+  p="$(active_provider)"
+  if [ "$(yqr ".providers.${p}.aliases.${alias}" "$MODELS_FILE" '')" != "" ]; then
+    printf '%s' "$p"
+    return 0
+  fi
   while IFS= read -r p; do
     [ -n "$p" ] || continue
     if [ "$(yqr ".providers.${p}.aliases.${alias}" "$MODELS_FILE" '')" != "" ]; then
@@ -98,6 +115,7 @@ provider_ready() {
   [ "$(yqr ".providers.${p}.enabled" "$MODELS_FILE" false)" = "true" ] || return 1
   cred="$(yqr ".providers.${p}.credential_env" "$MODELS_FILE" '')"
   [ -z "$cred" ] && return 0 # ambient/local credentials
+  [ "$(yqr ".providers.${p}.credential_optional" "$MODELS_FILE" false)" = "true" ] && return 0
   [ "$(credential_state "$cred")" = set ]
 }
 
@@ -108,6 +126,139 @@ expand_env_refs() { # "${FOO}" -> value of FOO, for discovery URLs/headers only
     s="${s//\$\{$var\}/${!var:-}}"
   done
   printf '%s' "$s"
+}
+
+# =============================================================================
+# Ollama Cloud transport
+# =============================================================================
+# direct  OLLAMA_API_KEY set → https://ollama.com, bare model names.
+# proxy   no key → the host's signed-in Ollama daemon, which serves the same
+#         cloud models under a `-cloud` name and forwards them to ollama.com.
+# The key never appears in argv: curl reads the header from a process
+# substitution (printf is a builtin), leaving stdin free for request bodies.
+oc_mode() { [ -n "${OLLAMA_API_KEY:-}" ] && printf direct || printf proxy; }
+oc_base() {
+  if [ "$(oc_mode)" = direct ]; then
+    printf '%s' "${OLLAMA_CLOUD_URL:-$(yqr '.providers.ollama_cloud.base_url_default' "$MODELS_FILE" https://ollama.com)}"
+  else
+    printf '%s' "${OLLAMA_BASE_URL:-$(yqr '.providers.ollama_cloud.proxy_url_default' "$MODELS_FILE" http://host.containers.internal:11434)}"
+  fi
+}
+oc_model() { # gpt-oss:120b → gpt-oss:120b-cloud in proxy mode
+  [ "$(oc_mode)" = direct ] && {
+    printf '%s' "$1"
+    return
+  }
+  case "$1" in *-cloud | *:cloud) printf '%s' "$1" ;; *:*) printf '%s-cloud' "$1" ;; *) printf '%s:cloud' "$1" ;; esac
+}
+oc_curl() { # oc_curl <path> [curl args...]
+  local path="$1"
+  shift
+  if [ "$(oc_mode)" = direct ]; then
+    curl -sS -H @<(printf 'Authorization: Bearer %s\n' "$OLLAMA_API_KEY") "$@" "$(oc_base)${path}"
+  else
+    curl -sS "$@" "$(oc_base)${path}"
+  fi
+}
+
+# The free plan's two hard stops. Neither recovers in seconds, so neither is
+# retried: say what happened and what the free fallback is.
+quota_message() { # quota_message <error text> → 0 if it is a quota stop
+  case "$1" in
+    *"monthly usage limit"* | *"usage limit"*)
+      err "Ollama Cloud: the account's free monthly allowance is spent (resets monthly from signup)."
+      ;;
+    *"not included in your free usage"*)
+      err "Ollama Cloud: this model is not on the free plan. Free models: ai models ollama_cloud"
+      ;;
+    *) return 1 ;;
+  esac
+  info "usage: https://ollama.com/settings/usage   free fallback: ai ask \"…\" --model gemini-fast"
+  return 0
+}
+
+# =============================================================================
+# Self-hosted transport: vLLM on GCP behind IAP tunnels opened by `ai up`.
+# =============================================================================
+sh_field() { yqr ".providers.selfhosted.$1" "$MODELS_FILE" "${2:-}"; }
+sh_port() { sh_field "endpoints.$1.local_port" ''; }
+sh_key_file() { printf '%s/models-api-key' "$(state_dir)"; }
+sh_key() { # env wins; else the 0600 file `ai up` wrote from Secret Manager
+  if [ -n "${DEVBOX_MODELS_API_KEY:-}" ]; then
+    printf '%s' "$DEVBOX_MODELS_API_KEY"
+  else cat "$(sh_key_file)" 2>/dev/null; fi
+}
+sh_curl() { # sh_curl <role> <path> [curl args...]
+  local role="$1" path="$2" port
+  shift 2
+  port="$(sh_port "$role")"
+  [ -n "$port" ] || abort "no self-hosted endpoint named '${role}' (see ai/models/models.yaml)"
+  curl -sS -H @<(printf 'Authorization: Bearer %s\n' "$(sh_key)") "$@" "http://127.0.0.1:${port}${path}"
+}
+
+# One chat completion against either backend. Never parallel: the Ollama free
+# plan allows one request at a time, and one GPU serves one agent best.
+# 429 and 5xx are retried with exponential backoff; quota stops are not.
+# Prints the answer on stdout and which model served it on stderr.
+chat_completion() { # chat_completion <provider> <model> <prompt> [max_output_tokens]
+  local provider="$1" model="$2" prompt="$3" max_out="${4:-4096}" cap est
+  cap="$(profile_field max_context_tokens 65536)"
+  est=$((${#prompt} / 4))
+  [ "$est" -le "$cap" ] ||
+    abort "prompt is ~${est} tokens, over this profile's ${cap}-token cap — send the relevant files, not the repo"
+
+  local -a send
+  case "$provider" in
+    ollama_cloud)
+      model="$(oc_model "$model")"
+      send=(oc_curl /v1/chat/completions)
+      ;;
+    selfhosted) send=(sh_curl "$model" /v1/chat/completions) ;;
+    *) abort "no HTTP transport for provider '${provider}'" ;;
+  esac
+
+  local timeout retries backoff attempt=0 code body tmp msg
+  timeout="$(yqr ".providers.${provider}.request.timeout_seconds" "$MODELS_FILE" 300)"
+  retries="$(yqr ".providers.${provider}.request.retries" "$MODELS_FILE" 3)"
+  backoff="$(yqr ".providers.${provider}.request.backoff_seconds" "$MODELS_FILE" 4)"
+  tmp="$(mktemp)"
+  body="$(jq -n --arg m "$model" --arg p "$prompt" --argjson n "$max_out" \
+    '{model: $m, messages: [{role: "user", content: $p}], max_tokens: $n, stream: false}')"
+  while :; do
+    code="$(printf '%s' "$body" | "${send[@]}" --max-time "$timeout" \
+      -H 'Content-Type: application/json' --data-binary @- -o "$tmp" -w '%{http_code}' 2>/dev/null)" || code=000
+    [ "$code" = 200 ] && break
+    msg="$(jq -r '.error.message // .error // .detail // empty' "$tmp" 2>/dev/null || head -c 300 "$tmp")"
+    if [ "$provider" = ollama_cloud ] && quota_message "$msg"; then
+      rm -f "$tmp"
+      return 3
+    fi
+    if [ "$provider" = selfhosted ] && [ "$code" = 000 ]; then
+      err "self-hosted '${model}' is not reachable on 127.0.0.1:$(sh_port "$model")"
+      info "start it: ai up ${model}   (status: ai status)"
+      rm -f "$tmp"
+      return 4
+    fi
+    case "$code" in
+      429 | 5?? | 000)
+        attempt=$((attempt + 1))
+        if [ "$attempt" -gt "$retries" ]; then
+          err "${provider}: HTTP ${code} after ${retries} retries: ${msg:-no response}"
+          rm -f "$tmp"
+          return 1
+        fi
+        sleep $((backoff * (1 << (attempt - 1))))
+        ;;
+      *)
+        err "${provider}: HTTP ${code}: ${msg}"
+        rm -f "$tmp"
+        return 1
+        ;;
+    esac
+  done
+  jq -r '.choices[0].message.content // empty' "$tmp"
+  jq -r --arg p "$provider" '"[\($p)/\(.model)] in=\(.usage.prompt_tokens // "?") out=\(.usage.completion_tokens // "?") tokens"' "$tmp" >&2
+  rm -f "$tmp"
 }
 
 # =============================================================================
@@ -131,10 +282,17 @@ cmd_models() {
       continue
     fi
 
+    if [ "$p" = ollama_cloud ]; then
+      printf '  %svia %s (%s); free plan: gpt-oss, gemma4, nemotron-3 only%s\n' "$D" "$(oc_base)" "$(oc_mode)" "$R"
+      oc_curl /api/tags --max-time 15 2>/dev/null | jq -r '.models[].name' 2>/dev/null |
+        sed -n 's/-cloud$//; s/:cloud$//; 1,40s/^/  /p' || printf '  %sdiscovery failed%s\n' "$D" "$R"
+      list_aliases "$p" ""
+      continue
+    fi
     local url
     url="$(yqr ".providers.${p}.discovery.url" "$MODELS_FILE" '')"
     if [ -z "$url" ]; then
-      printf '  %sno discovery endpoint — reached through the router%s\n' "$D" "$R"
+      printf '  %sno discovery endpoint%s\n' "$D" "$R"
       list_aliases "$p" ""
       continue
     fi
@@ -256,24 +414,39 @@ cmd_profile() {
   fi
   [ "$(yqr ".profiles.${name}.provider" "$PROFILES_FILE" '')" != "" ] ||
     abort "unknown profile: ${name}   (try: ai profile list)"
+  # The MCP trust profile follows the model profile — they are one decision.
+  local mprof
+  mprof="$(yqr ".profiles.${name}.mcp_profile" "$PROFILES_FILE" READ_ONLY)"
+  # An elevated trust profile (PRIVILEGED) is granted ONLY through `mcp
+  # profile`, which shows the warnings, asks, and records the expiry. Writing
+  # the state file directly here would be a permanent, unconfirmed elevation.
+  # It runs first so a "no" leaves both profiles exactly as they were.
+  local mcp_bin
+  mcp_bin="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/mcp"
+  [ -x "$mcp_bin" ] || mcp_bin="$(command -v mcp || true)"
+  if [ "$(yqr ".profiles.${mprof}.requires_confirmation" "$MCP_PROFILES_FILE" false)" = "true" ]; then
+    [ -n "$mcp_bin" ] || abort "profile ${name} needs MCP trust profile ${mprof}, and mcp is not available to confirm it"
+    "$mcp_bin" profile "$mprof" || abort "profile not changed — ${mprof} was not confirmed"
+  else
+    # A lower profile also drops any pending PRIVILEGED expiry; left behind,
+    # it would later "revert" this profile to DEVELOPER.
+    rm -f "${DEVBOX_STATE}/mcp-profile-expires" 2>/dev/null || true
+    state_set mcp-profile "$mprof"
+  fi
   state_set active-profile "$name"
   # Switching profile clears an explicit `ai use` override, otherwise the
   # profile you just selected would silently not be the one in effect.
   rm -f "${DEVBOX_STATE}/active-provider" "${DEVBOX_STATE}/active-model" 2>/dev/null || true
-  # The MCP trust profile follows the model profile — they are one decision.
-  local mprof
-  mprof="$(yqr ".profiles.${name}.mcp_profile" "$PROFILES_FILE" READ_ONLY)"
-  state_set mcp-profile "$mprof"
   audit_log ai-profile "profile=${name} mcp_profile=${mprof}"
   pass "profile ${B}${name}${R} — $(yqr ".profiles.${name}.description" "$PROFILES_FILE" '')"
   info "mcp trust profile → ${mprof}"
-  have mcp && mcp render --quiet 2>/dev/null || true
+  [ -n "$mcp_bin" ] && "$mcp_bin" render --quiet 2>/dev/null || true
 }
 
 # =============================================================================
 # ai ask / chat — dispatch to the right client
 # =============================================================================
-# Native CLI when one exists (so nothing is lost), router otherwise.
+# Native CLI when one exists (so nothing is lost), Ollama Cloud HTTP otherwise.
 dispatch_prompt() {
   local provider="$1" model="$2" prompt="$3"
   local cli
@@ -296,25 +469,13 @@ dispatch_prompt() {
     } ;;
   esac
 
-  # No native CLI: go through `llm`, which speaks to the router and to every
-  # OpenAI-compatible endpoint including Ollama.
-  if have llm; then
-    local -a llm_args=(-m "$resolved")
-    case "$provider" in
-      ollama)
-        local base="${OLLAMA_BASE_URL:-$(yqr '.providers.ollama.base_url_default' "$MODELS_FILE")}"
-        OPENAI_BASE_URL="${base}/v1" llm "${llm_args[@]}" "$prompt" 2>&1
-        return
-        ;;
-      *)
-        local rurl="${DEVBOX_ROUTER_URL:-$(yqr '.router.base_url_default' "$MODELS_FILE")}"
-        OPENAI_BASE_URL="$rurl" llm "${llm_args[@]}" "$prompt" 2>&1
-        return
-        ;;
-    esac
-  fi
+  case "$provider" in
+    ollama_cloud | selfhosted)
+      chat_completion "$provider" "$resolved" "$prompt" "$(profile_field max_output_tokens 4096)"
+      return
+      ;;
+  esac
   err "no client available for provider '${provider}'"
-  info "install a native CLI, or start the router:  podman compose --profile ai-router up -d"
   return 1
 }
 
@@ -372,6 +533,7 @@ cmd_chat() {
   provider="$(active_provider)"
   local cli
   cli="$(provider_cli "$provider")"
+  [ -n "$cli" ] || cli="$(yqr ".providers.${provider}.agent_cli" "$MODELS_FILE" '')"
   [ -n "$cli" ] && have "$cli" || abort "no interactive CLI for provider '${provider}'"
   audit_log ai-chat "provider=${provider}"
   info "handing off to ${cli} — every native flag and feature is available"
@@ -644,29 +806,191 @@ cmd_sync() { exec "${DEVBOX_ROOT}/scripts/configure/render-ai-rules.sh" "$@"; }
 cmd_doctor() {
   head1 "AI PLATFORM"
   head2 "Clients"
-  for c in claude codex gemini llm litellm; do
+  for c in hermes claude gemini codex; do
     if have "$c"; then
       pass "$(printf '%-10s %s' "$c" "$D$("$c" --version 2>/dev/null | head -1)$R")"
     else skip "$(printf '%-10s %s' "$c" 'not installed')"; fi
   done
   cmd_providers
-  head2 "Router"
-  local rurl="${DEVBOX_ROUTER_URL:-$(yqr '.router.base_url_default' "$MODELS_FILE")}"
-  local hp
-  hp="$(yqr '.router.health_path' "$MODELS_FILE" /health)"
-  if curl -sS --max-time 3 "${rurl}${hp}" >/dev/null 2>&1; then
-    pass "router reachable at ${rurl}"
-  else skip "router not running (${rurl}) — start with: podman compose --profile ai-router up -d"; fi
-  head2 "Local models"
-  local ourl="${OLLAMA_BASE_URL:-$(yqr '.providers.ollama.base_url_default' "$MODELS_FILE")}"
-  if curl -sS --max-time 3 "${ourl}/api/tags" >/dev/null 2>&1; then
-    pass "ollama reachable at ${ourl}"
-    curl -sS --max-time 5 "${ourl}/api/tags" 2>/dev/null | jq -r '.models[].name' 2>/dev/null | sed 's/^/      /'
-  else skip "ollama not reachable (${ourl}) — run it on the host or: podman compose --profile local-ai up -d"; fi
+  head2 "Ollama Cloud ($(oc_mode): $(oc_base))"
+  if oc_curl /api/tags --max-time 5 -o /dev/null 2>/dev/null; then
+    pass "reachable — \`ai quota\` checks the free allowance (costs one tiny request)"
+  elif [ "$(oc_mode)" = proxy ]; then
+    fail "host Ollama daemon not reachable at $(oc_base)"
+    info "set OLLAMA_API_KEY in .env (direct), or run \`ollama signin\` on the host"
+  else fail "https endpoint not reachable: $(oc_base)"; fi
   printf '\n'
 }
 
 # =============================================================================
+# ai up / down / status — the self-hosted GPU models' lifecycle
+# =============================================================================
+# The VMs are created STOPPED and stop themselves when idle (infra/gcp-models),
+# so GPU billing only runs between `ai up` and the idle timeout or `ai down`.
+gcp_args() {
+  local project zone
+  project="${DEVBOX_GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
+  zone="${DEVBOX_GCP_ZONE:-}"
+  [ -n "$project" ] || abort "set DEVBOX_GCP_PROJECT (terraform output devbox_env) in .env"
+  [ -n "$zone" ] || abort "set DEVBOX_GCP_ZONE (terraform output devbox_env) in .env"
+  printf -- '--project=%s\n--zone=%s\n' "$project" "$zone"
+}
+sh_roles() { yq -r '.providers.selfhosted.endpoints | keys | .[]' "$MODELS_FILE"; }
+sh_instance() { printf '%s%s' "$(sh_field gcp.instance_prefix devbox-model-)" "$1"; }
+tunnel_pid_file() { printf '%s/tunnel-%s.pid' "$(state_dir)" "$1"; }
+tunnel_alive() {
+  local f
+  f="$(tunnel_pid_file "$1")"
+  [ -s "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null
+}
+
+sh_roles_arg() { # all roles, or the ones named
+  if [ $# -eq 0 ]; then sh_roles; else printf '%s\n' "$@"; fi
+}
+
+cmd_up() {
+  have gcloud || abort "gcloud is not installed (build with FEATURE_CLOUD_GCP=1)"
+  gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | grep -q . ||
+    abort "not signed in to GCP — run: gcloud auth login --no-launch-browser"
+  local -a ga
+  mapfile -t ga < <(gcp_args) || exit 1
+  # The VM gives up after 75 min of startup, so wait a little longer than that.
+  local wait_s="${DEVBOX_MODELS_WAIT:-4500}" role inst port
+
+  # The API key: Secret Manager → a 0600 file in the state dir. Never printed.
+  if [ -z "${DEVBOX_MODELS_API_KEY:-}" ] && [ ! -s "$(sh_key_file)" ]; then
+    (umask 077 && gcloud secrets versions access latest \
+      --secret="$(sh_field gcp.api_key_secret devbox-models-api-key)" "${ga[0]}" >"$(sh_key_file)") ||
+      abort "could not read the model API key from Secret Manager"
+  fi
+
+  while IFS= read -r role; do
+    [ -n "$role" ] || continue
+    port="$(sh_port "$role")"
+    [ -n "$port" ] || abort "unknown self-hosted model: ${role} (have: $(sh_roles | paste -sd' '))"
+    inst="$(sh_instance "$role")"
+    head2 "${role} (${inst})"
+    case "$(gcloud compute instances describe "$inst" "${ga[@]}" --format='value(status)' 2>/dev/null)" in
+      RUNNING) pass "VM already running" ;;
+      "") abort "VM ${inst} not found — deploy infra/gcp-models first (docs/gcp-models.md)" ;;
+      *)
+        info "starting VM — billing starts now (~\$43/h Spot for 8×H200); it stops after 20 idle min or 4 h"
+        gcloud compute instances start "$inst" "${ga[@]}" --quiet >/dev/null || abort "could not start ${inst}"
+        audit_log ai-up "instance=${inst}"
+        ;;
+    esac
+    if ! tunnel_alive "$role"; then
+      nohup gcloud compute start-iap-tunnel "$inst" "$(sh_field gcp.remote_port 8000)" \
+        --local-host-port="localhost:${port}" "${ga[@]}" \
+        >"$(state_dir)/tunnel-${role}.log" 2>&1 &
+      echo $! >"$(tunnel_pid_file "$role")"
+    fi
+    info "waiting for the model on 127.0.0.1:${port} (each start copies ~0.6–0.9 TB of weights from GCS to local SSD)"
+    local t=0
+    until sh_curl "$role" /v1/models --max-time 5 -o /dev/null -f 2>/dev/null; do
+      tunnel_alive "$role" || {
+        sleep 5
+        nohup gcloud compute start-iap-tunnel "$inst" "$(sh_field gcp.remote_port 8000)" \
+          --local-host-port="localhost:${port}" "${ga[@]}" >"$(state_dir)/tunnel-${role}.log" 2>&1 &
+        echo $! >"$(tunnel_pid_file "$role")"
+      }
+      t=$((t + 15))
+      [ "$t" -ge "$wait_s" ] && abort "${role} not ready after ${wait_s}s — check: ai status; tunnel log: $(state_dir)/tunnel-${role}.log"
+      [ $((t % 120)) -eq 0 ] && info "  still loading (${t}s)"
+      sleep 15
+    done
+    pass "${role} ready on http://127.0.0.1:${port}/v1"
+  done < <(sh_roles_arg "$@")
+  [ "$(active_provider)" = selfhosted ] && "${DEVBOX_ROOT}/scripts/configure/hermes-config.sh" 2>/dev/null || true
+}
+
+cmd_down() {
+  local -a ga
+  mapfile -t ga < <(gcp_args) || exit 1
+  local role inst
+  while IFS= read -r role; do
+    [ -n "$role" ] || continue
+    inst="$(sh_instance "$role")"
+    if tunnel_alive "$role"; then kill "$(cat "$(tunnel_pid_file "$role")")" 2>/dev/null; fi
+    rm -f "$(tunnel_pid_file "$role")"
+    gcloud compute instances stop "$inst" "${ga[@]}" --discard-local-ssd=true --quiet --async >/dev/null 2>&1 &&
+      pass "stopping ${inst} (GPU billing ends when it reaches TERMINATED; local SSD weights are re-copied on next start)" ||
+      skip "${inst}: not found or already stopped"
+    audit_log ai-down "instance=${inst}"
+  done < <(sh_roles_arg "$@")
+}
+
+cmd_status() {
+  head1 "SELF-HOSTED MODELS"
+  local -a ga
+  mapfile -t ga < <(gcp_args 2>/dev/null) || true
+  local role vm tun api
+  printf '  %-10s %-26s %-12s %-8s %s\n' ROLE MODEL VM TUNNEL API
+  while IFS= read -r role; do
+    vm="?"
+    [ ${#ga[@]} -eq 2 ] && have gcloud &&
+      vm="$(gcloud compute instances describe "$(sh_instance "$role")" "${ga[@]}" --format='value(status)' 2>/dev/null || echo missing)"
+    tunnel_alive "$role" && tun=up || tun=down
+    sh_curl "$role" /v1/models --max-time 3 -o /dev/null -f 2>/dev/null && api="${GRN}ready${R}" || api="${D}-${R}"
+    printf '  %-10s %-26.26s %-12s %-8s %s\n' "$role" "$(sh_field "endpoints.${role}.model")" "${vm:-missing}" "$tun" "$api"
+  done < <(sh_roles)
+  printf '\n  %sbackend: %s   switch: ai use selfhosted | ai use ollama_cloud%s\n\n' "$D" "$(active_provider)" "$R"
+}
+
+# ai quota — is the free allowance usable right now? One tiny request per
+# model (num tokens out = 1), serially: the free plan allows one at a time.
+cmd_quota() {
+  head1 "OLLAMA CLOUD QUOTA ($(oc_mode))"
+  local a m rc out
+  while IFS= read -r a; do
+    [ -n "$a" ] || continue
+    m="$(resolve_alias ollama_cloud "$a")"
+    out="$(chat_completion ollama_cloud "$m" "Reply with OK." 1 2>&1 >/dev/null)"
+    rc=$?
+    case "$rc" in
+      0) pass "$(printf '%-13s %-18s %s' "$a" "$m" "ok")" ;;
+      3) fail "$(printf '%-13s %-18s %s' "$a" "$m" "$(printf '%s' "$out" | head -1 | sed 's/^.*Ollama Cloud: //')")" ;;
+      *) fail "$(printf '%-13s %-18s %s' "$a" "$m" "$(printf '%s' "$out" | head -1)")" ;;
+    esac
+  done < <(yq -r '.providers.ollama_cloud.aliases | keys | .[]' "$MODELS_FILE")
+  info "usage page: https://ollama.com/settings/usage"
+  printf '\n'
+}
+
+# ai claude — Claude Code on the active backend's open models, through its
+# Anthropic-compatible API (vLLM and Ollama both serve /v1/messages). The
+# Opus/Sonnet/Haiku tiers map to architect/coder/fast.
+cmd_claude() {
+  have claude || abort "claude is not installed"
+  local provider base tok m_coder m_arch m_fast
+  provider="$(active_provider)"
+  case "$provider" in
+    selfhosted)
+      # Claude Code talks to one base URL, so it uses the coder endpoint; the
+      # other tiers are served by the same VM only if you point them there.
+      base="http://127.0.0.1:$(sh_port coder)"
+      tok="$(sh_key)"
+      m_coder=coder m_arch=coder m_fast=coder
+      sh_curl coder /v1/models --max-time 3 -o /dev/null -f 2>/dev/null || abort "coder is not running — ai up coder"
+      ;;
+    ollama_cloud)
+      base="$(oc_base)"
+      tok=ollama
+      [ "$(oc_mode)" = direct ] && tok="$OLLAMA_API_KEY"
+      m_coder="$(oc_model "$(resolve_alias ollama_cloud coder)")"
+      m_arch="$(oc_model "$(resolve_alias ollama_cloud architect)")"
+      m_fast="$(oc_model "$(resolve_alias ollama_cloud fast)")"
+      ;;
+    *) abort "ai claude needs the selfhosted or ollama_cloud backend (active: ${provider})" ;;
+  esac
+  audit_log ai-claude "provider=${provider}"
+  ANTHROPIC_BASE_URL="$base" ANTHROPIC_AUTH_TOKEN="$tok" ANTHROPIC_API_KEY="" \
+    ANTHROPIC_MODEL="$m_coder" ANTHROPIC_DEFAULT_OPUS_MODEL="$m_arch" \
+    ANTHROPIC_DEFAULT_SONNET_MODEL="$m_coder" ANTHROPIC_DEFAULT_HAIKU_MODEL="$m_fast" \
+    CLAUDE_CODE_SUBAGENT_MODEL="$m_fast" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+    exec claude "$@"
+}
+
 main() {
   [ -n "$MODELS_FILE" ] || abort "ai/models/models.yaml not found — is this a DevBox?"
   local cmd="${1:-help}"
@@ -688,6 +1012,11 @@ main() {
     list) cmd_list ;;
     sync) cmd_sync "$@" ;;
     doctor) cmd_doctor ;;
+    quota) cmd_quota ;;
+    up) cmd_up "$@" ;;
+    down) cmd_down "$@" ;;
+    status) cmd_status ;;
+    claude) cmd_claude "$@" ;;
     help | --help | -h) usage ;;
     *)
       err "unknown command: $cmd"
