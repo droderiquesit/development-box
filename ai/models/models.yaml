@@ -1,20 +1,23 @@
 # =============================================================================
 # PROVIDERS AND MODEL ALIASES
 # =============================================================================
-# Model *names* are NOT hardcoded here. Providers ship new model ids constantly
-# and a hardcoded list is wrong within weeks. What this file defines is:
+# Aliases are ROLE names, and every inference backend defines the same roles:
 #
-#   1. which providers exist and how to reach them,
-#   2. which environment variable carries each provider's credential,
-#   3. stable *aliases* that route to whatever the current good model is.
+#   coder      primary agentic coder (implements, fixes, tests)
+#   architect  hardest reasoning: architecture, design review, tricky bugs
+#   fast       routine work: summaries, commit messages, small edits
+#   review     second opinion from a different model family than `coder`
 #
-# `ai models` calls each configured provider's model-discovery endpoint and
-# prints what the provider actually offers right now. The aliases below are the
-# only names this repo's config depends on, so a provider renaming a model does
-# not ripple into every profile and workflow.
+# Profiles, routing and agents name roles only, so switching backend is one
+# command (`ai use <provider>`) and touches no other file.
 #
-# Credentials are read from the environment at runtime. Nothing here is a secret
-# and nothing here is baked into the image.
+# Default backend: `selfhosted` — the three largest open-weight models that fit
+# one 8×H200 node, in your own GCP project (infra/gcp-models/,
+# docs/gcp-models.md). You pay for GPU hours (~$43/h per model on Spot); the
+# VMs stop themselves after 20 idle minutes and after 4 hours regardless.
+#
+# Credentials are read at runtime (environment, or the 0600 state file written
+# by `ai up`). Nothing here is a secret and nothing here is baked into the image.
 # =============================================================================
 
 apiVersion: devbox.ai/v1
@@ -22,14 +25,102 @@ kind: ModelCatalog
 metadata:
   name: devbox-models
 
+default_provider: selfhosted
+
 providers:
 
-  anthropic:
+  # --------------------------------------------------------------------------
+  # Self-hosted vLLM on Compute Engine, reached through IAP tunnels that
+  # `ai up <role>` opens to localhost. OpenAI- and Anthropic-compatible.
+  # --------------------------------------------------------------------------
+  selfhosted:
     enabled: true
-    kind: native                  # a first-party CLI exists: claude
+    kind: openai_compatible
+    agent_cli: hermes
+    credential_env: DEVBOX_MODELS_API_KEY
+    credential_optional: true     # `ai up` fetches it from Secret Manager
+    gcp:
+      project_env: DEVBOX_GCP_PROJECT
+      zone_env: DEVBOX_GCP_ZONE
+      instance_prefix: devbox-model-
+      api_key_secret: devbox-models-api-key
+      remote_port: 8000
+    request:
+      timeout_seconds: 900        # long agentic generations on 1T-class models
+      retries: 3
+      backoff_seconds: 4
+    # served model name → where it listens locally once tunnelled.
+    endpoints:                    # mirrors infra/gcp-models/variables.tf
+      architect: {local_port: 18001, model: moonshotai/Kimi-K2.6,             context_tokens: 262144}
+      coder:     {local_port: 18002, model: deepseek-ai/DeepSeek-V4-Pro-0813, context_tokens: 200000}
+      fast:      {local_port: 18003, model: zai-org/GLM-5.3,                  context_tokens: 262144}
+    aliases:
+      coder:     coder
+      architect: architect
+      fast:      fast
+      review:    architect        # Kimi reviews DeepSeek's code: different family
+
+  # --------------------------------------------------------------------------
+  # Ollama Cloud — hosted alternative, no GPUs to run. Free plan: gpt-oss,
+  # gemma4 and nemotron-3 only, ONE concurrent request, a small monthly
+  # allowance shared by all models (HTTP 429 "monthly usage limit" when spent;
+  # `ai quota` reports it). Two transports, picked automatically:
+  #   OLLAMA_API_KEY set → https://ollama.com directly
+  #   no key             → the host's signed-in Ollama daemon (`-cloud` models)
+  # --------------------------------------------------------------------------
+  ollama_cloud:
+    enabled: true
+    kind: ollama_cloud
+    agent_cli: hermes
+    credential_env: OLLAMA_API_KEY
+    credential_optional: true
+    base_url_env: OLLAMA_CLOUD_URL
+    base_url_default: https://ollama.com
+    proxy_url_env: OLLAMA_BASE_URL
+    proxy_url_default: http://host.containers.internal:11434
+    request:
+      timeout_seconds: 300
+      retries: 3                  # 429 queue-full and 5xx, exponential backoff
+      backoff_seconds: 4
+    aliases:
+      coder:     gpt-oss:120b
+      architect: nemotron-3-ultra
+      fast:      gpt-oss:20b
+      review:    nemotron-3-super
+    context_tokens:               # from /api/show, 2026-10
+      gpt-oss:120b: 131072
+      gpt-oss:20b: 131072
+      nemotron-3-ultra: 262144
+      nemotron-3-super: 262144
+      gemma4:31b: 262144
+
+  # --------------------------------------------------------------------------
+  # Gemini CLI on the Google free tier (sign in with `gemini`, or a free AI
+  # Studio key). A no-GPU fallback.
+  # --------------------------------------------------------------------------
+  google:
+    enabled: true
+    kind: native
+    cli: gemini
+    credential_env: GEMINI_API_KEY
+    credential_optional: true
+    discovery:
+      url: https://generativelanguage.googleapis.com/v1beta/models
+      headers:
+        x-goog-api-key: "${GEMINI_API_KEY}"
+      json_path: ".models[].name"
+    aliases:
+      gemini:      gemini-2.5-pro
+      gemini-fast: gemini-2.5-flash
+
+  # --------------------------------------------------------------------------
+  # Paid APIs — disabled. Set `enabled: true` to opt in.
+  # --------------------------------------------------------------------------
+  anthropic:
+    enabled: false
+    kind: native
     cli: claude
     credential_env: ANTHROPIC_API_KEY
-    # Discovery: GET /v1/models
     discovery:
       url: https://api.anthropic.com/v1/models
       headers:
@@ -37,12 +128,12 @@ providers:
         anthropic-version: "2023-06-01"
       json_path: ".data[].id"
     aliases:
-      claude:       claude-sonnet-4-5      # sensible default
+      claude:       claude-sonnet-5-5
       claude-fast:  claude-haiku-4-5
-      claude-deep:  claude-opus-4-1
+      claude-deep:  claude-opus-5-5
 
   openai:
-    enabled: true
+    enabled: false
     kind: native
     cli: codex
     credential_env: OPENAI_API_KEY
@@ -54,95 +145,3 @@ providers:
     aliases:
       gpt:    gpt-5
       codex:  gpt-5-codex
-
-  google:
-    enabled: true
-    kind: native
-    cli: gemini
-    credential_env: GEMINI_API_KEY
-    discovery:
-      url: https://generativelanguage.googleapis.com/v1beta/models
-      headers:
-        x-goog-api-key: "${GEMINI_API_KEY}"
-      json_path: ".models[].name"
-    aliases:
-      gemini:      gemini-2.5-pro
-      gemini-fast: gemini-2.5-flash
-
-  # --------------------------------------------------------------------------
-  # Enterprise-hosted endpoints. Same models, different control plane, different
-  # compliance story — which is exactly why they are separate providers rather
-  # than options on the ones above.
-  # --------------------------------------------------------------------------
-  azure_openai:
-    enabled: false
-    kind: gateway                 # reached through the LiteLLM router
-    credential_env: AZURE_OPENAI_API_KEY
-    required_env:
-      - AZURE_OPENAI_ENDPOINT     # https://<resource>.openai.azure.com
-      - AZURE_OPENAI_API_VERSION
-    notes: "Deployment names are tenant-specific; set them in ai/models/router.yaml."
-
-  bedrock:
-    enabled: false
-    kind: gateway
-    # No API key: Bedrock uses the ambient AWS credential chain, which means
-    # IAM roles / SSO / IRSA work without a secret ever entering the DevBox.
-    credential_env: ""
-    required_env:
-      - AWS_REGION
-    notes: "Prefer an assumed role over static keys."
-
-  vertex_ai:
-    enabled: false
-    kind: gateway
-    credential_env: ""            # Application Default Credentials
-    required_env:
-      - GOOGLE_CLOUD_PROJECT
-      - GOOGLE_CLOUD_LOCATION
-    notes: "Prefer workload identity over a service-account key file."
-
-  # --------------------------------------------------------------------------
-  # Local inference. The DevBox is a CLIENT only — the model runtime lives on the
-  # host or in its own container (see compose.yaml, profile `local-ai`). Putting a
-  # 6 GB runtime inside a development container is how you get a 12 GB image that
-  # nobody can rebuild.
-  # --------------------------------------------------------------------------
-  ollama:
-    enabled: true
-    kind: openai_compatible
-    base_url_env: OLLAMA_BASE_URL
-    base_url_default: http://host.containers.internal:11434
-    credential_env: ""            # none needed
-    discovery:
-      url: "${OLLAMA_BASE_URL}/api/tags"
-      json_path: ".models[].name"
-    aliases:
-      local:          qwen2.5-coder:14b
-      qwen-coder:     qwen2.5-coder:14b
-      llama:          llama3.3:70b
-      deepseek-coder: deepseek-coder-v2:16b
-
-  # Any OpenAI-compatible endpoint: vLLM, LM Studio, llama.cpp, a corporate
-  # gateway, an internal proxy. One entry covers the whole class.
-  openai_compatible:
-    enabled: true
-    kind: openai_compatible
-    base_url_env: OPENAI_COMPATIBLE_BASE_URL
-    credential_env: OPENAI_COMPATIBLE_API_KEY
-    aliases:
-      nemotron: nemotron3-super
-
-# -----------------------------------------------------------------------------
-# The router. `ai` talks to native CLIs directly when one exists (so `claude`
-# keeps every feature it has), and falls back to the LiteLLM gateway for
-# providers with no first-party CLI. That is the whole abstraction.
-# -----------------------------------------------------------------------------
-router:
-  enabled: true
-  kind: litellm
-  base_url_env: DEVBOX_ROUTER_URL
-  base_url_default: http://model-router:4000
-  # The router is a separate container. It never sees a filesystem, a repo or an
-  # MCP server: it forwards chat completions and nothing else.
-  health_path: /health/liveliness

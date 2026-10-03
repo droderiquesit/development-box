@@ -1,8 +1,8 @@
 ---
 name: code-review-agent
 profile: code-review
-model: codex
-reviewer: claude
+model: review
+reviewer: review
 mcp_servers: [filesystem, git, github]
 permissions: {read: [/workspace], write: [], execute: SAFE}
 rules: [engineering, secrets]

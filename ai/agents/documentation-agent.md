@@ -1,7 +1,7 @@
 ---
 name: documentation-agent
 profile: balanced
-model: claude
+model: coder
 reviewer: null
 mcp_servers: [filesystem, git, context7]
 permissions: {read: [/workspace], write: [/workspace], execute: SAFE}

@@ -1,7 +1,7 @@
 ---
 name: cost-agent
 profile: balanced
-model: claude
+model: coder
 reviewer: null
 mcp_servers: [filesystem, git, fetch]
 permissions: {read: [/workspace], write: [], execute: SAFE}

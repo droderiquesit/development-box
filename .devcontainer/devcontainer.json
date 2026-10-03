@@ -35,7 +35,10 @@
   // the container. Without it every file appears as root and git refuses to work.
   "runArgs": [
     "--userns=keep-id",
-    "--security-opt=label=disable"
+    "--security-opt=label=disable",
+    // Same network as compose.yaml: internet for IAP tunnels / ollama.com,
+    // plus the host's Ollama daemon on 127.0.0.1:11434.
+    "--network=slirp4netns:allow_host_loopback=true"
   ],
 
   "customizations": {
@@ -98,7 +101,6 @@
   // port is a service you did not know you had exposed.
   "forwardPorts": [],
   "portsAttributes": {
-    "4000": { "label": "LiteLLM model router", "onAutoForward": "silent" }
   },
 
   // Runs once after the container is created. Non-fatal by design — a failing
@@ -112,7 +114,10 @@
 
   "remoteEnv": {
     "DEVBOX_WORKSPACE": "/workspace",
-    "DEVBOX_IN_VSCODE": "1"
+    "DEVBOX_IN_VSCODE": "1",
+    "DEVBOX_GCP_PROJECT": "${localEnv:DEVBOX_GCP_PROJECT}",
+    "DEVBOX_GCP_ZONE": "${localEnv:DEVBOX_GCP_ZONE}",
+    "OLLAMA_API_KEY": "${localEnv:OLLAMA_API_KEY}"
   },
 
   "features": {},

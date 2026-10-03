@@ -44,16 +44,45 @@ chmod 0700 "$DEVBOX_STATE" 2>/dev/null || true
 # --- first-run seeding -------------------------------------------------------
 # The image ships defaults; the user gets a writable copy in a volume. That is
 # what makes the container disposable and your configuration persistent.
-seed() { # seed <src-rel> <dst-abs>
-  local src="${DEVBOX_ROOT}/$1" dst="$2"
-  [ -e "$dst" ] && return 0
+tree_sum() { # tree_sum <path> → one checksum over a file or directory
+  (cd "$1" 2>/dev/null && find . -type f ! -name '.devbox-seed' -print0 | sort -z | xargs -0 sha256sum ||
+    sha256sum <"$1") 2>/dev/null | sha256sum | cut -d' ' -f1
+}
+# seed <src-rel> <dst-abs> — copy image defaults into the config volume, and
+# keep them current. The volume outlives the image, so a copy-once seed would
+# pin every existing box to the config of the image it was created from.
+#   absent              → copy
+#   unedited since seed → replace with the image's version
+#   edited by the user  → keep, and say so
+#   seeded before this marker existed → back up, then replace
+seed() {
+  local src="${DEVBOX_ROOT}/$1" dst="$2" mark new old
   [ -e "$src" ] || return 0
+  [ -d "$src" ] && mark="${dst}/.devbox-seed" || mark="${dst}.devbox-seed"
+  new="$(tree_sum "$src")"
+  if [ -e "$dst" ]; then
+    old="$(cat "$mark" 2>/dev/null || true)"
+    [ "$old" = "$new" ] && return 0
+    if [ -z "$old" ]; then
+      cp -r "$dst" "${dst}.bak-$(date +%Y%m%d)" && log "backed up $(basename "$dst") before refresh"
+    elif [ "$(tree_sum "$dst")" != "$old" ]; then
+      log "keeping your edited $(basename "$dst"); image default: ${src}"
+      return 0
+    fi
+    rm -rf "$dst"
+  fi
   mkdir -p "$(dirname "$dst")"
-  cp -r "$src" "$dst" 2>/dev/null && log "seeded $(basename "$dst")"
+  cp -r "$src" "$dst" && printf '%s\n' "$new" >"$mark" && log "seeded $(basename "$dst")"
 }
 seed mcp/servers.yaml "${DEVBOX_CONFIG}/mcp/servers.yaml"
 seed ai/models "${DEVBOX_CONFIG}/ai/models"
 seed ai/policies "${DEVBOX_CONFIG}/ai/policies"
+
+# Hermes: point it at Ollama Cloud and set the autonomy/token limits. Only the
+# keys we manage are written; everything else in its config stays yours.
+if command -v hermes >/dev/null 2>&1; then
+  "${DEVBOX_ROOT}/scripts/configure/hermes-config.sh" || log "hermes config skipped"
+fi
 
 # --- terraform CLI configuration --------------------------------------------
 # Written every start so the plugin cache path always matches the mounted volume.

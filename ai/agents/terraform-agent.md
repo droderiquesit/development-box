@@ -1,8 +1,8 @@
 ---
 name: terraform-agent
 profile: terraform
-model: claude
-reviewer: codex
+model: coder
+reviewer: review
 mcp_servers: [filesystem, git, terraform, context7, github]
 permissions: {read: [/workspace], write: [/workspace], execute: REVIEW_REQUIRED}
 rules: [terraform, cloud, secrets, engineering]

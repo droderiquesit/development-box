@@ -131,10 +131,15 @@ jobs:
         env:
           CACHE_PUSH: '1'
         run: |
+          # RepoDigests form (repo@sha256:…) -> bare digest for the OCI
+          # base.digest label, exactly as build-devbox.yml does. Without it the
+          # released image is labelled base.digest=unknown.
+          base_digest='${{ steps.base.outputs.digest }}'
           .github/scripts/podman-build.sh \
             Containerfile \
             "localhost/devbox:${{ steps.v.outputs.version }}" \
             --build-arg BASE_IMAGE_REF="${{ steps.v.outputs.base }}" \
+            --build-arg BASE_IMAGE_DIGEST="${base_digest##*@}" \
             --build-arg VCS_REF="${{ steps.v.outputs.sha }}" \
             --build-arg BUILD_DATE="${{ steps.v.outputs.date }}" \
             --build-arg VERSION="${{ steps.v.outputs.version }}"

@@ -66,7 +66,9 @@ RUN DEVBOX_VERSIONS_FILE=/opt/devbox/versions.yaml \
 FROM ${BASE_IMAGE_REF} AS devbox
 
 USER root
-SHELL ["/bin/bash", "-lc"]
+# No SHELL directive: podman builds the OCI format, which ignores SHELL, so
+# every RUN is /bin/sh -c. Install steps are scripts with their own shebangs,
+# and PATH is set explicitly below rather than via a login shell.
 
 ARG BASE_IMAGE_REF
 # The manifest digest the base ref resolved to at build time — CI passes it
@@ -78,7 +80,7 @@ ARG DEV_UID=1000
 ARG DEV_GID=1000
 ARG FEATURE_CLOUD_AWS=0
 ARG FEATURE_CLOUD_AZURE=0
-ARG FEATURE_CLOUD_GCP=0
+ARG FEATURE_CLOUD_GCP=1
 ARG FEATURE_K8S_LOCAL=0
 ARG FEATURE_AI_GEMINI=1
 ARG FEATURE_AI_EXTRA=0
@@ -111,6 +113,19 @@ ENV FEATURE_CLOUD_AWS=${FEATURE_CLOUD_AWS} \
     FEATURE_ANSIBLE=${FEATURE_ANSIBLE} \
     DEVBOX_VERSIONS_FILE=/opt/devbox/versions.yaml
 
+# PATH is an IMAGE property, not a login-shell property. HEALTHCHECK,
+# `docker exec <cmd>`, VS Code server processes and CI run-steps all execute
+# without a login shell; when the tool roots only enter PATH through
+# /etc/devbox/shell.d/00-env.sh, every one of those contexts sees a crippled
+# image — the healthcheck reported `yq`/`claude`/`codex` missing while an
+# interactive shell in the same container found all three. Order mirrors the
+# profile: user overrides > devbox CLIs > npm/uv tool roots > Go > system.
+# The profile's idempotent prepends then agree with this instead of fighting it.
+ENV PATH=/home/${DEV_USER}/.local/bin:/opt/devbox/bin:/opt/devbox/npm-global/bin:/opt/devbox/uv-tools/bin:/home/${DEV_USER}/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Hermes state (config, sessions, memories, skills) lives on the devbox-share
+# volume so it survives container recreation and image upgrades.
+ENV HERMES_HOME=/home/${DEV_USER}/.local/share/hermes
+
 COPY scripts/lib/  /opt/devbox/scripts/lib/
 COPY versions.yaml /opt/devbox/versions.yaml
 COPY scripts/install/ /opt/devbox/scripts/install/
@@ -134,6 +149,7 @@ RUN /opt/devbox/scripts/install/60-cloud.sh
 USER ${DEV_USER}
 RUN /opt/devbox/scripts/install/55-python-tools.sh
 RUN /opt/devbox/scripts/install/70-ai.sh
+RUN /opt/devbox/scripts/install/72-hermes.sh
 RUN /opt/devbox/scripts/install/75-mcp.sh
 
 # --- governance, configuration and the developer CLIs -----------------------
@@ -172,16 +188,6 @@ RUN chmod +x /usr/local/bin/devbox-entrypoint
 USER ${DEV_USER}
 WORKDIR /workspace
 ENV HOME=/home/${DEV_USER}
-
-# PATH is an IMAGE property, not a login-shell property. HEALTHCHECK,
-# `docker exec <cmd>`, VS Code server processes and CI run-steps all execute
-# without a login shell; when the tool roots only enter PATH through
-# /etc/devbox/shell.d/00-env.sh, every one of those contexts sees a crippled
-# image — the healthcheck reported `yq`/`claude`/`codex` missing while an
-# interactive shell in the same container found all three. Order mirrors the
-# profile: user overrides > devbox CLIs > npm/uv tool roots > Go > system.
-# The profile's idempotent prepends then agree with this instead of fighting it.
-ENV PATH=/home/${DEV_USER}/.local/bin:/opt/devbox/bin:/opt/devbox/npm-global/bin:/opt/devbox/uv-tools/bin:/home/${DEV_USER}/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # `devbox doctor --quiet` is the health check: it exercises the real tool
 # surface rather than asserting that a single binary happens to exist.

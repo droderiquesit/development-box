@@ -12,12 +12,13 @@
 # the first catches things a second pass from the *same* model will not, because
 # it does not share the same blind spots.
 #
-# HARD LIMITS (from ai/policies/policy.yaml → limits):
-#   * a workflow is a fixed, declared sequence — no agent decides what runs next
-#   * max 8 steps, max 3 iterations per step, 30 minute wall clock
-#   * no agent may invoke itself, spawn a background job, or extend the chain
-#   * every workflow ends at a human
-# This is a pipeline, not an autonomous loop. That is deliberate.
+# Aliases are roles defined by every backend (ai/models/models.yaml):
+#   coder (primary), architect (hard reasoning), fast (routine),
+#   review (second opinion from a different model family).
+#
+# HARD LIMITS come from ai/policies/policy.yaml → limits (steps, iterations,
+# timeout, no self-invocation). A workflow is a fixed, declared sequence — no
+# agent decides what runs next.
 # =============================================================================
 
 apiVersion: devbox.ai/v1
@@ -28,77 +29,69 @@ metadata:
 routing:
 
   terraform:
-    primary: claude
-    reviewer: codex
+    primary: coder
+    reviewer: review
     profile: terraform
-    rationale: "Claude for authoring against the registry MCP server; Codex reviews because it fails differently."
+    rationale: "Primary authors against the registry MCP server; a different model family reviews because it fails differently."
 
   python:
-    primary: codex
-    reviewer: claude
+    primary: coder
+    reviewer: review
     profile: balanced
 
   go:
-    primary: claude
-    reviewer: codex
+    primary: coder
+    reviewer: review
     profile: balanced
 
   typescript:
-    primary: codex
-    reviewer: claude
+    primary: coder
+    reviewer: review
     profile: balanced
 
   bash:
-    primary: claude
+    primary: coder
     reviewer: null
     profile: fast
     post_checks: [shellcheck]
 
   kubernetes:
-    primary: claude
-    reviewer: codex
+    primary: coder
+    reviewer: review
     profile: balanced
 
   github-actions:
-    primary: claude
+    primary: coder
     reviewer: null
     profile: balanced
     post_checks: [actionlint, yamllint, shellcheck]
 
   architecture:
-    primary: claude
-    reviewer: gemini
-    profile: architecture
+    primary: coder
+    reviewer: review
+    profile: deep
 
   research:
-    primary: gemini
+    primary: architect
     reviewer: null
     profile: balanced
-    rationale: "Largest context window — the right tool for reading a whole repo or spec at once."
+    rationale: "Largest free context window (256K) for reading a spec at once."
 
   security:
-    primary: claude
-    reviewer: codex
+    primary: coder
+    reviewer: review
     profile: code-review
     post_checks: [trivy, checkov, gitleaks, semgrep]
 
   documentation:
-    primary: claude
+    primary: coder
     reviewer: null
     profile: balanced
 
-  offline:
-    primary: local
-  healing:
-    primary: nemotron
-    reviewer: claude-deep
-    profile: god_mode
-
-
   docs-sync:
-    primary: claude
-    reviewer: gemini
-    profile: architecture
+    primary: coder
+    reviewer: review
+    profile: deep
 
 # -----------------------------------------------------------------------------
 # Workflows. Each is a fixed pipeline of declared steps. `ai run <name>`.
@@ -113,8 +106,8 @@ workflows:
     description: "Author or review Terraform, then have it independently reviewed, scanned, costed, and handed to a human."
     max_steps: 6
     steps:
-      - {kind: agent, role: terraform-agent, model: claude,  action: analyse}
-      - {kind: agent, role: code-review-agent, model: codex, action: review, input: previous}
+      - {kind: agent, role: terraform-agent, model: coder,  action: analyse}
+      - {kind: agent, role: code-review-agent, model: review, action: review, input: previous}
       - {kind: tool,  run: "devbox terraform check"}
       - {kind: tool,  run: "devbox security scan --scope terraform"}
       - {kind: tool,  run: "infracost breakdown --path .", optional: true}
@@ -124,9 +117,9 @@ workflows:
     description: "Design proposal, adversarially reviewed by a different model family."
     max_steps: 4
     steps:
-      - {kind: agent, role: architecture-agent, model: claude, action: propose}
-      - {kind: agent, role: architecture-agent, model: gemini, action: challenge, input: previous}
-      - {kind: agent, role: cost-agent,         model: claude, action: estimate, input: previous}
+      - {kind: agent, role: architecture-agent, model: coder, action: propose}
+      - {kind: agent, role: architecture-agent, model: architect, action: challenge, input: previous}
+      - {kind: agent, role: cost-agent,         model: coder, action: estimate, input: previous}
       - {kind: human, action: approve}
 
   security-review:
@@ -134,8 +127,8 @@ workflows:
     max_steps: 4
     steps:
       - {kind: tool,  run: "devbox security scan --format json"}
-      - {kind: agent, role: security-agent, model: claude, action: triage, input: previous}
-      - {kind: agent, role: security-agent, model: codex,  action: verify, input: previous}
+      - {kind: agent, role: security-agent, model: coder, action: triage, input: previous}
+      - {kind: agent, role: security-agent, model: review,  action: verify, input: previous}
       - {kind: human, action: approve}
 
   github-actions-review:
@@ -143,7 +136,7 @@ workflows:
     max_steps: 3
     steps:
       - {kind: tool,  run: "devbox github check"}
-      - {kind: agent, role: github-agent, model: claude, action: review, input: previous}
+      - {kind: agent, role: github-agent, model: coder, action: review, input: previous}
       - {kind: human, action: approve}
 
   incident-analysis:
@@ -151,6 +144,6 @@ workflows:
     max_steps: 3
     profile: code-review
     steps:
-      - {kind: agent, role: sre-agent, model: claude, action: analyse}
-      - {kind: agent, role: sre-agent, model: codex,  action: challenge, input: previous}
+      - {kind: agent, role: sre-agent, model: coder, action: analyse}
+      - {kind: agent, role: sre-agent, model: review,  action: challenge, input: previous}
       - {kind: human, action: approve}

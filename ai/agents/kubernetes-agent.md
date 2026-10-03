@@ -1,8 +1,8 @@
 ---
 name: kubernetes-agent
 profile: balanced
-model: claude
-reviewer: codex
+model: coder
+reviewer: review
 mcp_servers: [filesystem, git, github, context7]
 permissions: {read: [/workspace], write: [/workspace], execute: REVIEW_REQUIRED}
 rules: [kubernetes, engineering, secrets]

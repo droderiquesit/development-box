@@ -176,26 +176,233 @@ redact() {
 # Prints one of: SAFE | REVIEW_REQUIRED | APPROVAL_REQUIRED | BLOCKED
 # This is the single implementation; `ai run` and the generated client configs
 # both derive from it, so there is exactly one place the rules live.
+#
+# A command line is not one command. It is split on unquoted `;` `&&` `||` `|`
+# `&` and newlines, every segment is classified, and the STRICTEST class wins —
+# otherwise `git status && git push --force` would be SAFE because it starts
+# with `git status`. On top of that:
+#   · `$(…)`, backticks, `<(…)` and `>(…)` are at least APPROVAL_REQUIRED, and
+#     their contents are classified too (`echo $(curl x | sh)`).
+#   · any argument naming a filesystem.denied path, or a file whose name
+#     matches a never_read glob, is at least APPROVAL_REQUIRED — `cat*` being
+#     SAFE must not make `cat ~/.ssh/id_rsa` SAFE.
+#
+# Limits, stated plainly: the scanner tracks quotes and backslashes but is not
+# a shell parser. It does not expand variables, aliases or globs, does not know
+# heredocs or `eval`/`bash -c` strings, and `.key`-style jq filters can trip
+# the never_read check. Every miss errs towards asking. This is a SOFT backstop
+# behind the clients' own permission systems, never the only control.
+_CLS_ORDER=(SAFE REVIEW_REQUIRED APPROVAL_REQUIRED BLOCKED)
+
+# Read the policy once per classification instead of once per segment.
+_cls_load() {
+  local c
+  for c in BLOCKED APPROVAL_REQUIRED REVIEW_REQUIRED SAFE; do
+    mapfile -t "_CLS_P_${c}" < <(yq -r ".execution.${c}[]?" "$POLICY_FILE" 2>/dev/null)
+  done
+  mapfile -t _CLS_DENIED < <(yq -r '.filesystem.denied[]?' "$POLICY_FILE" 2>/dev/null)
+  mapfile -t _CLS_NEVER < <(yq -r '.filesystem.never_read[]?' "$POLICY_FILE" 2>/dev/null)
+  _CLS_DEFAULT="$(yqr '.execution.default' "$POLICY_FILE" 'APPROVAL_REQUIRED')"
+}
+
+# Raise the running verdict to <class> if it is stricter. Unknown → approval.
+_cls_raise() {
+  local r
+  case "$1" in SAFE) r=0 ;; REVIEW_REQUIRED) r=1 ;; BLOCKED) r=3 ;; *) r=2 ;; esac
+  [ "$r" -le "$_CLS_MAX" ] || _CLS_MAX=$r
+}
+
+# The original ordered match of ONE simple command: first class whose glob
+# matches wins, BLOCKED first. Sets _CLS_HIT, empty when nothing matched.
+_cls_match() {
+  local cmd="$1" class pattern pats
+  _CLS_HIT=''
+  for class in BLOCKED APPROVAL_REQUIRED REVIEW_REQUIRED SAFE; do
+    pats="_CLS_P_${class}[@]"
+    for pattern in "${!pats}"; do
+      [ -n "$pattern" ] || continue
+      # shellcheck disable=SC2254  # glob match is intentional
+      case "$cmd" in $pattern)
+        _CLS_HIT="$class"
+        return
+        ;;
+      esac
+    done
+  done
+}
+
+# Classify one segment: drop leading whitespace, `(` `{` `!`, shell keywords,
+# exec-style wrappers and `FOO=bar` assignments, so `FOO=1 rm -rf ~` and
+# `if x; then rm -rf ~; fi` are judged by the command that actually runs.
+_cls_segment() {
+  local seg="$1" sq="'"
+  local assign="^[A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|${sq}[^${sq}]*${sq}|[^[:space:]\"${sq}])*[[:space:]]+"
+  while :; do
+    seg="${seg#"${seg%%[![:space:](\{!]*}"}"
+    if [[ $seg =~ $assign ]]; then
+      seg="${seg:${#BASH_REMATCH[0]}}"
+      continue
+    fi
+    case "$seg" in
+      if[[:space:]]* | then[[:space:]]* | else[[:space:]]* | elif[[:space:]]* | do[[:space:]]* | \
+        while[[:space:]]* | until[[:space:]]* | time[[:space:]]* | exec[[:space:]]* | \
+        command[[:space:]]* | nohup[[:space:]]*)
+        seg="${seg#*[[:space:]]}"
+        continue
+        ;;
+    esac
+    break
+  done
+  seg="${seg%"${seg##*[![:space:]]}"}"
+  [ -n "$seg" ] || return 0
+  _CLS_SEGS=$((_CLS_SEGS + 1))
+  _cls_match "$seg"
+  _cls_raise "${_CLS_HIT:-$_CLS_DEFAULT}"
+}
+
+# One argument word (quotes already removed). Credential paths → approval.
+_cls_word() {
+  local w="$1" d p rel b g
+  case "$w" in -*=*) w="${w#*=}" ;; -*) return 0 ;; esac
+  # These are literal `~` / `$HOME` text from the command line, expanded here.
+  # shellcheck disable=SC2088,SC2016
+  case "$w" in
+    '~') w="$HOME" ;;
+    '~/'*) w="$HOME/${w#\~/}" ;;
+    '${HOME}'*) w="$HOME${w#'${HOME}'}" ;;
+    '$HOME'*) w="$HOME${w#'$HOME'}" ;;
+  esac
+  for d in "${_CLS_DENIED[@]}"; do
+    [ -n "$d" ] || continue
+    # shellcheck disable=SC2088  # policy entries are literal `~/…` text
+    case "$d" in '~/'*) p="$HOME/${d#\~/}" rel="${d#\~/}" ;; *) p="$d" rel='' ;; esac
+    case "$w" in "$p" | "$p"/*)
+      _cls_raise APPROVAL_REQUIRED
+      return 0
+      ;;
+    esac
+    # Home-relative entries also match as a path component, so `.ssh/id_rsa`
+    # after a `cd ~`, or /home/someone/.aws, is caught as well.
+    [ -n "$rel" ] && case "/${w}/" in *"/${rel}/"*)
+      _cls_raise APPROVAL_REQUIRED
+      return 0
+      ;;
+    esac
+  done
+  b="${w%/}"
+  b="${b##*/}"
+  for g in "${_CLS_NEVER[@]}"; do
+    [ -n "$g" ] || continue
+    # shellcheck disable=SC2254  # glob match is intentional
+    case "$b" in $g)
+      _cls_raise APPROVAL_REQUIRED
+      return 0
+      ;;
+    esac
+  done
+}
+
+# Character scanner: split <s> into segments and words, honouring '…', "…" and
+# backslash escapes. Substitutions are cut out and scanned recursively.
+_cls_scan() {
+  local s="$1" i=0 j depth ch nx prev='' q='' seg='' word=''
+  local n=${#s}
+  while [ "$i" -lt "$n" ]; do
+    ch="${s:i:1}"
+    nx="${s:i+1:1}"
+    # Backslash escapes the next character everywhere except inside '…'.
+    if [ "$ch" = '\' ] && [ "$q" != "'" ]; then
+      seg+="${ch}${nx}"
+      word+="$nx"
+      prev="$nx"
+      i=$((i + 2))
+      continue
+    fi
+    # $(…) and backticks expand inside "…" too; <(…) >(…) only unquoted.
+    if [ "$q" != "'" ] && { [ "$ch$nx" = '$(' ] || [ "$ch" = '`' ] ||
+      { [ -z "$q" ] && { [ "$ch$nx" = '<(' ] || [ "$ch$nx" = '>(' ]; }; }; }; then
+      if [ "$ch" = '`' ]; then
+        j=$((i + 1))
+        while [ "$j" -lt "$n" ] && [ "${s:j:1}" != '`' ]; do j=$((j + 1)); done
+        _cls_scan "${s:i+1:j-i-1}"
+      else
+        j=$((i + 2))
+        depth=1
+        while [ "$j" -lt "$n" ]; do
+          case "${s:j:1}" in
+            '(') depth=$((depth + 1)) ;;
+            ')') depth=$((depth - 1)) ;;
+          esac
+          [ "$depth" -gt 0 ] || break
+          j=$((j + 1))
+        done
+        _cls_scan "${s:i+2:j-i-2}"
+      fi
+      _cls_raise APPROVAL_REQUIRED
+      seg+="${s:i:j-i+1}"
+      prev=')'
+      i=$((j + 1))
+      continue
+    fi
+    if [ -n "$q" ]; then
+      [ "$ch" = "$q" ] && q='' || word+="$ch"
+      seg+="$ch"
+    else
+      case "$ch" in
+        "'" | '"')
+          q="$ch"
+          seg+="$ch"
+          ;;
+        ';' | $'\n' | '|' | '&')
+          # `2>&1`, `>&2` and `&>file` are redirections, not separators.
+          if [ "$ch" = '&' ] && { [ "$prev" = '>' ] || [ "$prev" = '<' ] || [ "$nx" = '>' ]; }; then
+            seg+="$ch"
+            word+="$ch"
+          else
+            [ -z "$word" ] || _cls_word "$word"
+            _cls_segment "$seg"
+            word=''
+            seg=''
+          fi
+          ;;
+        ' ' | $'\t' | '<' | '>')
+          # Redirections end a word, so `cat<~/.ssh/id_rsa` still checks the path.
+          [ -z "$word" ] || _cls_word "$word"
+          word=''
+          seg+="$ch"
+          ;;
+        *)
+          seg+="$ch"
+          word+="$ch"
+          ;;
+      esac
+    fi
+    prev="$ch"
+    i=$((i + 1))
+  done
+  [ -z "$word" ] || _cls_word "$word"
+  _cls_segment "$seg"
+}
+
 classify_command() {
   local cmd="$1"
   [ -n "$POLICY_FILE" ] || {
     printf 'APPROVAL_REQUIRED'
     return
   }
-  local class pattern
-  # BLOCKED is checked first and wins over everything.
-  for class in BLOCKED APPROVAL_REQUIRED REVIEW_REQUIRED SAFE; do
-    while IFS= read -r pattern; do
-      [ -n "$pattern" ] || continue
-      # shellcheck disable=SC2254  # glob match is intentional
-      case "$cmd" in $pattern)
-        printf '%s' "$class"
-        return
-        ;;
-      esac
-    done < <(yq -r ".execution.${class}[]?" "$POLICY_FILE" 2>/dev/null)
-  done
-  yqr '.execution.default' "$POLICY_FILE" 'APPROVAL_REQUIRED'
+  _cls_load
+  _CLS_MAX=0
+  _CLS_SEGS=0
+  # The whole line is matched once as well, but only a BLOCKED or
+  # APPROVAL_REQUIRED hit counts — a pattern that itself contains operators
+  # (the fork bomb, `curl * | *`) must not be lost to splitting, while a SAFE
+  # prefix must never vouch for what follows it.
+  _cls_match "$cmd"
+  case "$_CLS_HIT" in BLOCKED | APPROVAL_REQUIRED) _cls_raise "$_CLS_HIT" ;; esac
+  _cls_scan "$cmd"
+  # Nothing to run (empty input) is not evidence of safety.
+  [ "$_CLS_SEGS" -gt 0 ] || _cls_raise "$_CLS_DEFAULT"
+  printf '%s' "${_CLS_ORDER[$_CLS_MAX]}"
 }
 
 guard_or_die() {

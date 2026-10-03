@@ -1,7 +1,0 @@
-#!/bin/bash
-# devbox-monitor: monitors logs for errors and triggers AI healing
-LOG_FILE="/var/log/devbox.log"
-while tail -f $LOG_FILE | grep -i "ERROR"; do
-  echo "Error detected. Triggering AI healing..."
-  ai run healing --input "Log failure detected: $(tail -n 20 $LOG_FILE)"
-done
