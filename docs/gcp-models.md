@@ -24,6 +24,31 @@ and as much stronger on agentic tasks. To serve the preview instead, change
 Everything lives in [`infra/gcp-models/`](../infra/gcp-models) and is deployed
 by [`.github/workflows/gcp-models.yml`](../.github/workflows/gcp-models.yml).
 
+
+## Default today: Vertex AI managed open models
+
+Self-hosting needs H200 GPU quota, and Google declined the automatic request
+for this project (2026-10-03: "We cannot grant the preferred quota '8' …
+'0' was granted"). Until a manual quota review succeeds, the DevBox defaults to
+the `vertex` backend: the same class of models, served by Google in your
+project and billed per token. There are no VMs to start or stop.
+
+| Role | Model | Size |
+|---|---|---|
+| coder | `zai-org/glm-5.2-maas` | 753B |
+| architect | `moonshotai/kimi-k2-thinking-maas` | 1T |
+| fast, review | `deepseek-ai/deepseek-v3.2-maas` | 671B |
+
+Inside the DevBox, once:
+
+```bash
+gcloud auth login --no-launch-browser                      # for `ai ask`
+gcloud auth application-default login --no-launch-browser  # for Hermes
+```
+
+Then `ai ask "…"` and `ai chat` (Hermes) use these models. Switch to the
+self-hosted VMs with `ai use selfhosted` once they are deployed.
+
 ## Architecture
 
 ```mermaid

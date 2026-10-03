@@ -4,7 +4,8 @@
 # the entrypoint on every start and by `ai up`. Idempotent: only the keys below
 # are written; everything else in Hermes' config stays yours.
 #
-#   selfhosted   vLLM `coder` behind the IAP tunnel `ai up` opened (default)
+#   vertex       Vertex AI managed open models in your project (default)
+#   selfhosted   vLLM `coder` behind the IAP tunnel `ai up` opened
 #   ollama_cloud OLLAMA_API_KEY → ollama.com; no key → host Ollama daemon
 # -----------------------------------------------------------------------------
 set -euo pipefail
@@ -16,6 +17,16 @@ backend="$(state_get active-provider "$(yqr '.default_provider' "$MODELS_FILE" s
 ctx="$(yqr '.profiles.balanced.max_context_tokens' "$PROFILES_FILE" 65536)"
 
 case "$backend" in
+  vertex)
+    # Native Vertex provider: Hermes mints and refreshes OAuth tokens from
+    # Application Default Credentials (`gcloud auth application-default
+    # login` once inside the box, or the VM's service account on GCP).
+    project="${DEVBOX_GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null || true)}"
+    set_key model.provider vertex
+    set_key model.default "$(yqr '.providers.vertex.aliases.coder' "$MODELS_FILE" zai-org/glm-5.2-maas)"
+    set_key vertex.region "$(yqr '.providers.vertex.location' "$MODELS_FILE" global)"
+    [ -n "$project" ] && set_key vertex.project_id "$project"
+    ;;
   selfhosted)
     port="$(yqr '.providers.selfhosted.endpoints.coder.local_port' "$MODELS_FILE" 18002)"
     set_key model.provider custom

@@ -11,7 +11,8 @@
 # Profiles, routing and agents name roles only, so switching backend is one
 # command (`ai use <provider>`) and touches no other file.
 #
-# Default backend: `selfhosted` — the three largest open-weight models that fit
+# Default backend: `vertex` — Vertex AI managed open models, billed per token.
+# Alternative `selfhosted` (needs H200 GPU quota) — the three largest that fit
 # one 8×H200 node, in your own GCP project (infra/gcp-models/,
 # docs/gcp-models.md). You pay for GPU hours (~$43/h per model on Spot); the
 # VMs stop themselves after 20 idle minutes and after 4 hours regardless.
@@ -25,9 +26,34 @@ kind: ModelCatalog
 metadata:
   name: devbox-models
 
-default_provider: selfhosted
+default_provider: vertex
 
 providers:
+
+  # --------------------------------------------------------------------------
+  # Vertex AI managed open models (MaaS) in your GCP project — the default.
+  # Google serves them; your project is billed per token. No GPUs, no GPU
+  # quota, nothing to start or stop. Auth: your gcloud login (OAuth access
+  # tokens, minted per request — there is no API key). Verified 2026-10-03:
+  # all three answer from development-drodinvest via the OpenAI-compatible
+  # endpoint, and Hermes completed an inspect→run→fix→verify loop on GLM-5.2.
+  # --------------------------------------------------------------------------
+  vertex:
+    enabled: true
+    kind: vertex_maas
+    agent_cli: hermes
+    credential_env: ""            # gcloud / ADC, never a static key
+    project_env: DEVBOX_GCP_PROJECT
+    location: global
+    request:
+      timeout_seconds: 600
+      retries: 3                  # 429 rate limits and 5xx, exponential backoff
+      backoff_seconds: 4
+    aliases:
+      coder:     zai-org/glm-5.2-maas             # 753B, agentic coding
+      architect: moonshotai/kimi-k2-thinking-maas # 1T, deep reasoning
+      fast:      deepseek-ai/deepseek-v3.2-maas   # 671B, quick replies
+      review:    deepseek-ai/deepseek-v3.2-maas   # different family from coder
 
   # --------------------------------------------------------------------------
   # Self-hosted vLLM on Compute Engine, reached through IAP tunnels that
