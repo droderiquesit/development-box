@@ -235,3 +235,6 @@ config/ca-certificates/*.pem
 
 # The template is committed; a filled-in .env never is.
 !.env.example
+
+# graphify knowledge graph output (local index; repo is public)
+graphify-out/
