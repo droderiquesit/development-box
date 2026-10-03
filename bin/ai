@@ -128,7 +128,6 @@ expand_env_refs() { # "${FOO}" -> value of FOO, for discovery URLs/headers only
   printf '%s' "$s"
 }
 
-
 # =============================================================================
 # Ollama Cloud transport
 # =============================================================================
@@ -146,7 +145,10 @@ oc_base() {
   fi
 }
 oc_model() { # gpt-oss:120b → gpt-oss:120b-cloud in proxy mode
-  [ "$(oc_mode)" = direct ] && { printf '%s' "$1"; return; }
+  [ "$(oc_mode)" = direct ] && {
+    printf '%s' "$1"
+    return
+  }
   case "$1" in *-cloud | *:cloud) printf '%s' "$1" ;; *:*) printf '%s-cloud' "$1" ;; *) printf '%s:cloud' "$1" ;; esac
 }
 oc_curl() { # oc_curl <path> [curl args...]
@@ -836,7 +838,11 @@ gcp_args() {
 sh_roles() { yq -r '.providers.selfhosted.endpoints | keys | .[]' "$MODELS_FILE"; }
 sh_instance() { printf '%s%s' "$(sh_field gcp.instance_prefix devbox-model-)" "$1"; }
 tunnel_pid_file() { printf '%s/tunnel-%s.pid' "$(state_dir)" "$1"; }
-tunnel_alive() { local f; f="$(tunnel_pid_file "$1")"; [ -s "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; }
+tunnel_alive() {
+  local f
+  f="$(tunnel_pid_file "$1")"
+  [ -s "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null
+}
 
 sh_roles_arg() { # all roles, or the ones named
   if [ $# -eq 0 ]; then sh_roles; else printf '%s\n' "$@"; fi

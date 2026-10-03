@@ -32,7 +32,7 @@ case "$backend" in
     ;;
   ollama_cloud)
     alias_model() { yqr ".providers.ollama_cloud.aliases.$1" "$MODELS_FILE" "$2"; }
-    cloud_name() { case "$1" in *:*) printf '%s-cloud' "$1" ;; *) printf '%s:cloud' "$1" ;; esac; }
+    cloud_name() { case "$1" in *:*) printf '%s-cloud' "$1" ;; *) printf '%s:cloud' "$1" ;; esac }
     primary="$(alias_model coder gpt-oss:120b)"
     if [ -n "${OLLAMA_API_KEY:-}" ]; then
       # Hermes reads OLLAMA_API_KEY from the environment; it is not written here.

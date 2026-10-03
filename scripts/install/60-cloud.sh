@@ -76,8 +76,15 @@ if [ "${FEATURE_CLOUD_GCP:-0}" = "1" ]; then
   apt_update
   # gke-gcloud-auth-plugin is mandatory for kubectl against GKE since 1.26.
   apt_install google-cloud-cli google-cloud-cli-gke-gcloud-auth-plugin
+  # Any gcloud call creates a config dir under $HOME (here the dev user's, as
+  # the base image sets HOME) — and image-finalize rightly refuses an image
+  # that ships one. Point the build-time calls at a throwaway directory.
+  CLOUDSDK_CONFIG="$(mktemp -d)"
+  export CLOUDSDK_CONFIG
   gcloud config set core/disable_usage_reporting true --installation 2>/dev/null || true
   gcloud --version | head -1
+  rm -rf "$CLOUDSDK_CONFIG"
+  unset CLOUDSDK_CONFIG
   INSTALLED_ANY=1
 fi
 

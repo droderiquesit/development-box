@@ -22,6 +22,10 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/../lib/versions.sh"
 
 export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-180}"
+# The project pins its interpreter (.python-version), so uv may download one.
+# It must live in the image, not under ~/.local/share — that path is a volume
+# at runtime and would hide it, breaking the venv.
+export UV_PYTHON_INSTALL_DIR=/opt/devbox/uv-python
 HERMES_DIR=/opt/devbox/hermes-agent
 BIN_DIR="${UV_TOOL_BIN_DIR:-/opt/devbox/uv-tools/bin}"
 
