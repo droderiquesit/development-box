@@ -353,6 +353,21 @@ engineering:
     - "Write tests for the behaviour you changed."
     - "Report failures honestly: if a check did not pass, say so and show the output."
     - "When you are uncertain, say you are uncertain. Do not present a guess as a fact."
+    - "Write the least code that solves the problem: no speculative abstractions, unrequested features, dead code or defensive branches for impossible cases."
+
+# -----------------------------------------------------------------------------
+# Context and tooling — spend tokens on reasoning, not on reading
+# -----------------------------------------------------------------------------
+# Applies where the tool is installed; each rule names its own precondition.
+tooling:
+  enforcement: SOFT
+  rules:
+    - "Navigate code with the language server (definition, references, hover) before grep or whole-file reads: pyright for Python, typescript-language-server for TS/JS, rust-analyzer for Rust."
+    - "After editing Python, TypeScript or Rust, check LSP diagnostics and fix any new errors before moving on."
+    - "If `graphify-out/graph.json` exists, answer structure questions with `graphify query`, `graphify explain` or `graphify affected` before exploring files. Run `graphify update .` after structural changes."
+    - "Shell output may be compressed by rtk. When exact raw output matters, run `rtk proxy <cmd>`."
+    - "Read only what you need: search with `rg -n`, then read line ranges. Never re-read a file you just wrote or reproduce file contents in your reply."
+    - "Delegate broad searches to a subagent and keep only its conclusion."
 
 # -----------------------------------------------------------------------------
 # Agent execution limits — bounds on autonomy
