@@ -196,6 +196,27 @@ sh_curl() { # sh_curl <role> <path> [curl args...]
   curl -sS -H @<(printf 'Authorization: Bearer %s\n' "$(sh_key)") "$@" "http://127.0.0.1:${port}${path}"
 }
 
+# =============================================================================
+# Vertex AI MaaS transport: OpenAI-compatible, OAuth token per request.
+# =============================================================================
+vx_project() {
+  local p="${DEVBOX_GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
+  [ -n "$p" ] || abort "set DEVBOX_GCP_PROJECT (or gcloud config set project)"
+  printf '%s' "$p"
+}
+vx_base() {
+  printf 'https://aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/openapi' \
+    "$(vx_project)" "$(yqr '.providers.vertex.location' "$MODELS_FILE" global)"
+}
+vx_curl() { # vx_curl <path> [curl args...] — token via process substitution, never argv
+  local path="$1" tok
+  shift
+  have gcloud || abort "gcloud is not installed"
+  tok="$(gcloud auth print-access-token 2>/dev/null)" ||
+    abort "not signed in to GCP — run: gcloud auth login --no-launch-browser"
+  curl -sS -H @<(printf 'Authorization: Bearer %s\n' "$tok") "$@" "$(vx_base)${path}"
+}
+
 # One chat completion against either backend. Never parallel: the Ollama free
 # plan allows one request at a time, and one GPU serves one agent best.
 # 429 and 5xx are retried with exponential backoff; quota stops are not.
@@ -214,6 +235,7 @@ chat_completion() { # chat_completion <provider> <model> <prompt> [max_output_to
       send=(oc_curl /v1/chat/completions)
       ;;
     selfhosted) send=(sh_curl "$model" /v1/chat/completions) ;;
+    vertex) send=(vx_curl /chat/completions) ;;
     *) abort "no HTTP transport for provider '${provider}'" ;;
   esac
 
@@ -470,7 +492,7 @@ dispatch_prompt() {
   esac
 
   case "$provider" in
-    ollama_cloud | selfhosted)
+    ollama_cloud | selfhosted | vertex)
       chat_completion "$provider" "$resolved" "$prompt" "$(profile_field max_output_tokens 4096)"
       return
       ;;

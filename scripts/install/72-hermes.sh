@@ -10,7 +10,8 @@
 # project's hash-pinned uv.lock. What we skip is everything that installer does
 # for a personal machine — its own uv/Node copies, Playwright browsers,
 # messaging gateways, shell rc edits. Extras are limited to what an engineering
-# agent uses: MCP client support and a PTY for interactive commands.
+# agent uses: MCP client support, a PTY for interactive commands, and
+# google-auth for the Vertex AI provider (the default model backend).
 #
 # Code lives in the image (/opt/devbox/hermes-agent, read-only to the agent);
 # state lives in $HERMES_HOME on a volume (see Containerfile).
@@ -41,7 +42,7 @@ rm -rf "$HERMES_DIR/.git"
 
 cd "$HERMES_DIR"
 retry 3 env UV_PROJECT_ENVIRONMENT="$HERMES_DIR/venv" \
-  uv sync --quiet --locked --no-dev --extra mcp --extra pty
+  uv sync --quiet --locked --no-dev --extra mcp --extra pty --extra vertex
 ln -sf "$HERMES_DIR/venv/bin/hermes" "$BIN_DIR/hermes"
 
 uv cache clean >/dev/null 2>&1 || true
