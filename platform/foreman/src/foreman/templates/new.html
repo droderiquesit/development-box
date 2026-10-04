@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}New blueprint &middot; Foreman{% endblock %}
+{% block content %}
+<h1 class="mb-4 text-xl font-semibold tracking-tight">New blueprint</h1>
+{% if error %}<div class="alert mb-4" role="alert">{{ error }}</div>{% endif %}
+<form method="post" action="/runs" enctype="multipart/form-data" class="card space-y-5" id="new-run">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label class="block">
+    <span class="label">Blueprint (markdown)</span>
+    <textarea name="blueprint_md" rows="12" class="input font-mono text-sm" placeholder="# What to build&#10;&#10;## Feature one&#10;...">{{ form.blueprint_md or "" }}</textarea>
+  </label>
+  <label class="block">
+    <span class="label">&hellip;or upload a .md file</span>
+    <input type="file" name="blueprint_file" accept=".md,text/markdown,text/plain" class="file-input">
+  </label>
+  <div class="grid gap-4 sm:grid-cols-2">
+    <label class="block">
+      <span class="label">Repository</span>
+      <input name="repo" required placeholder="owner/name" pattern="[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+" value="{{ form.repo or '' }}" class="input" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </label>
+    <label class="block">
+      <span class="label">Base branch</span>
+      <input name="base_branch" value="{{ form.base_branch or 'main' }}" class="input" autocapitalize="off" spellcheck="false">
+    </label>
+  </div>
+  <div x-data="agents" data-initial="{{ form.max_agents }}">
+    <div class="flex items-baseline justify-between">
+      <span class="label">Max agents</span>
+      <span class="text-lg font-semibold tabular-nums text-indigo-600 dark:text-indigo-400" x-text="count">{{ form.max_agents }}</span>
+    </div>
+    <input type="range" name="max_agents" min="1" max="20" value="{{ form.max_agents }}" x-model="count" class="range">
+    <div class="flex justify-between text-xs text-slate-500"><span>1</span><span>20</span></div>
+  </div>
+  <label class="flex items-center gap-3">
+    <input type="checkbox" name="plan_only" class="toggle" {% if form.plan_only %}checked{% endif %}>
+    <span>
+      <span class="font-medium">Plan only</span>
+      <span class="block text-xs text-slate-500">Show the plan for approval before any worker starts.</span>
+    </span>
+  </label>
+  <button type="submit" class="btn btn-primary w-full sm:w-auto">Plan it</button>
+</form>
+{% endblock %}

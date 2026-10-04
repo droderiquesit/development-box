@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid gap-5 md:grid-cols-5">
+  <div class="md:col-span-3">
+    <div class="mb-3 flex items-center justify-between">
+      <h1 class="text-xl font-semibold tracking-tight">Runs</h1>
+      <a href="/runs/new" class="text-sm text-indigo-600 dark:text-indigo-400">+ New</a>
+    </div>
+    {% if runs %}
+    <div class="space-y-3" id="runs">
+      {% for r in runs %}{% include "partials/run_card.html" %}{% endfor %}
+    </div>
+    {% else %}
+    <div class="card text-center text-slate-500" id="runs">
+      <p>No runs yet.</p>
+      <a href="/runs/new" class="btn btn-primary mt-3">Submit a blueprint</a>
+    </div>
+    {% endif %}
+  </div>
+  <div class="md:col-span-2">
+    {% include "partials/models.html" %}
+  </div>
+</div>
+{% endblock %}

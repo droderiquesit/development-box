@@ -1,0 +1,34 @@
+@import "tailwindcss";
+@source "../src/foreman/templates";
+@source "../src/foreman/static/app.js";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer components {
+  .card { @apply rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900; }
+  .card-title { @apply text-sm font-semibold uppercase tracking-wide text-slate-500; }
+  .btn { @apply inline-flex min-h-10 items-center justify-center gap-1 rounded-xl px-3.5 text-sm font-medium transition active:scale-[.98] disabled:opacity-50; }
+  .btn-primary { @apply bg-indigo-600 text-white shadow-sm hover:bg-indigo-500; }
+  .btn-secondary { @apply border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700; }
+  .btn-danger { @apply border border-rose-300 bg-white text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:bg-transparent dark:text-rose-300 dark:hover:bg-rose-950; }
+  .btn-ghost { @apply text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800; }
+  .pill { @apply inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ring-1 ring-inset; }
+  .pill-ok { @apply bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-400/30; }
+  .pill-info { @apply bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-950 dark:text-sky-300 dark:ring-sky-400/30; }
+  .pill-warn { @apply bg-amber-50 text-amber-800 ring-amber-600/20 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-400/30; }
+  .pill-bad { @apply bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-950 dark:text-rose-300 dark:ring-rose-400/30; }
+  .pill-muted { @apply bg-slate-100 text-slate-600 ring-slate-500/20 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-400/20; }
+  .label { @apply mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300; }
+  .input { @apply block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base shadow-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 dark:border-slate-700 dark:bg-slate-950; }
+  .file-input { @apply block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-indigo-700 dark:text-slate-400 dark:file:bg-indigo-950 dark:file:text-indigo-300; }
+  .range { @apply mt-2 w-full accent-indigo-600; }
+  .toggle { @apply h-6 w-6 shrink-0 rounded accent-indigo-600; }
+  .alert { @apply rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200; }
+  .toast { @apply max-w-md rounded-xl bg-slate-900 px-4 py-2.5 text-sm text-white shadow-lg dark:bg-slate-100 dark:text-slate-900; }
+  .spinner { @apply inline-block h-3 w-3 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent align-[-1px]; }
+
+  /* Progress bars without inline styles (CSP forbids style attributes). */
+  .bar { @apply h-2 w-full appearance-none overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800; }
+  .bar::-webkit-progress-bar { @apply bg-slate-200 dark:bg-slate-800; }
+  .bar::-webkit-progress-value { @apply rounded-full bg-indigo-500 transition-all; }
+  .bar::-moz-progress-bar { @apply rounded-full bg-indigo-500; }
+}
