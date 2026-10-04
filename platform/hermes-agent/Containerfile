@@ -54,6 +54,17 @@ RUN cd /opt/hermes-agent/web && \
     npm run build && rm -rf node_modules && npm cache clean --force && \
     test -f /opt/hermes-agent/hermes_cli/web_dist/index.html
 
+# --- the chat TUI the dashboard's Chat tab attaches to -----------------------
+# Otherwise Hermes runs `npm install` + build into /opt/hermes-agent on first
+# chat, which the unprivileged runtime user cannot write ("npm install
+# failed."). Prebuilt here and pointed at with HERMES_TUI_DIR, Hermes just runs
+# dist/entry.js. node_modules stays: the bundle resolves some deps at runtime.
+RUN cd /opt/hermes-agent && \
+    npm install --workspace ui-tui --include=dev --no-fund --no-audit --progress=false && \
+    cd ui-tui && npm run build && \
+    test -f /opt/hermes-agent/ui-tui/dist/entry.js && npm cache clean --force
+ENV HERMES_TUI_DIR=/opt/hermes-agent/ui-tui
+
 # --- unprivileged runtime user ------------------------------------------------
 RUN useradd --create-home --uid 10001 --shell /bin/bash agent && \
     install -d -o agent -g agent /workspace
