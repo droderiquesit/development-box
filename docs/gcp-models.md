@@ -24,7 +24,6 @@ and as much stronger on agentic tasks. To serve the preview instead, change
 Everything lives in [`infra/gcp-models/`](../infra/gcp-models) and is deployed
 by [`.github/workflows/gcp-models.yml`](../.github/workflows/gcp-models.yml).
 
-
 ## Default today: Vertex AI managed open models
 
 Self-hosting needs H200 GPU quota, and Google declined the automatic request

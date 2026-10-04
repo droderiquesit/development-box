@@ -21,7 +21,12 @@ case "$backend" in
     # Native Vertex provider: Hermes mints and refreshes OAuth tokens from
     # Application Default Credentials (`gcloud auth application-default
     # login` once inside the box, or the VM's service account on GCP).
-    project="${DEVBOX_GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null || true)}"
+    # Asking gcloud would create ~/.config/gcloud in a box nobody has signed
+    # in to yet; only consult it once that directory already exists.
+    project="${DEVBOX_GCP_PROJECT:-${GOOGLE_CLOUD_PROJECT:-}}"
+    if [ -z "$project" ] && [ -d "$HOME/.config/gcloud" ]; then
+      project="$(gcloud config get-value project 2>/dev/null || true)"
+    fi
     set_key model.provider vertex
     set_key model.default "$(yqr '.providers.vertex.aliases.coder' "$MODELS_FILE" zai-org/glm-5.2-maas)"
     set_key vertex.region "$(yqr '.providers.vertex.location' "$MODELS_FILE" global)"
