@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Settings &middot; Foreman{% endblock %}
+{% block content %}
+<h1 class="mb-4 text-xl font-semibold tracking-tight">Settings</h1>
+<section class="card">
+  <dl class="divide-y divide-slate-200 dark:divide-slate-800">
+    {% for name, value in rows %}
+    <div class="flex flex-wrap justify-between gap-2 py-2.5 text-sm">
+      <dt class="text-slate-500">{{ name }}</dt>
+      <dd class="min-w-0 break-all font-mono text-xs">{{ value }}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+  <p class="mt-4 text-xs text-slate-500">Configuration comes from FOREMAN_* environment variables; secrets are never shown.</p>
+</section>
+<section class="card mt-4 text-sm text-slate-600 dark:text-slate-400">
+  <h2 class="card-title">About</h2>
+  <p class="mt-2">Foreman plans a blueprint into small tasks, runs one coding agent per task, has a second model review each pull request, and leaves every merge to you.</p>
+</section>
+{% endblock %}

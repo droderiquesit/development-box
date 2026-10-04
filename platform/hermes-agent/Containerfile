@@ -1,0 +1,79 @@
+# =============================================================================
+# Hermes agent image for Cloud Run — one container per agent.
+# =============================================================================
+# Slim on purpose: Cloud Run pulls the whole image on every cold start, so this
+# carries Hermes (pinned tag + commit, hash-locked deps), its web dashboard,
+# and the everyday toolchain an agent needs to clone, build, test and open PRs
+# (git, gh, Node 22, Python via uv). Inference is Vertex AI — no GPU here.
+#
+# Build:  podman build -f platform/hermes-agent/Containerfile platform/hermes-agent
+# Versions mirror versions.yaml (ai.hermes / ai.hermes_commit).
+# =============================================================================
+ARG BASE=docker.io/library/node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c
+
+FROM ${BASE}
+
+ARG HERMES_VERSION=v2026.9.24
+ARG HERMES_COMMIT=f97608f178d1ffeca59860195ab7da295f7c8e5f
+ARG UV_VERSION=0.11.14
+ARG UV_SHA256=f3b623eb0e6141a7053d571d59a0bdc341e0f238ea8f5f0b4815ddbec9a2a296
+ARG GH_VERSION=2.102.0
+ARG GH_SHA256=bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
+
+
+# --- OS packages: the agent's working toolchain ------------------------------
+RUN apt-get update -q && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+      git curl ca-certificates jq unzip ripgrep build-essential openssh-client && \
+    rm -rf /var/lib/apt/lists/*
+
+# --- uv and gh, pinned by checksum -------------------------------------------
+RUN curl -fsSLo /tmp/uv.tgz "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" && \
+    echo "${UV_SHA256}  /tmp/uv.tgz" | sha256sum -c - && \
+    tar -xzf /tmp/uv.tgz -C /tmp && install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uv /tmp/uv-x86_64-unknown-linux-gnu/uvx /usr/local/bin/ && \
+    curl -fsSLo /tmp/gh.tgz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" && \
+    echo "${GH_SHA256}  /tmp/gh.tgz" | sha256sum -c - && \
+    tar -xzf /tmp/gh.tgz -C /tmp && install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh && \
+    rm -rf /tmp/*
+
+# --- Hermes: the tag must resolve to the pinned commit -----------------------
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python \
+    UV_PROJECT_ENVIRONMENT=/opt/hermes-agent/venv \
+    UV_HTTP_TIMEOUT=180
+RUN git clone --quiet --depth 1 --branch "${HERMES_VERSION}" https://github.com/NousResearch/hermes-agent /opt/hermes-agent && \
+    test "$(git -C /opt/hermes-agent rev-parse HEAD)" = "${HERMES_COMMIT}" && \
+    rm -rf /opt/hermes-agent/.git && \
+    cd /opt/hermes-agent && \
+    uv sync --quiet --locked --no-dev --extra mcp --extra pty --extra vertex --extra web && \
+    ln -s /opt/hermes-agent/venv/bin/hermes /usr/local/bin/hermes && \
+    uv cache clean
+
+# --- the dashboard UI, built once here so containers start with --skip-build --
+RUN cd /opt/hermes-agent/web && \
+    if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi && \
+    npm run build && rm -rf node_modules && npm cache clean --force && \
+    test -f /opt/hermes-agent/hermes_cli/web_dist/index.html
+
+# --- the chat TUI the dashboard's Chat tab attaches to -----------------------
+# Otherwise Hermes runs `npm install` + build into /opt/hermes-agent on first
+# chat, which the unprivileged runtime user cannot write ("npm install
+# failed."). Prebuilt here and pointed at with HERMES_TUI_DIR, Hermes just runs
+# dist/entry.js. node_modules stays: the bundle resolves some deps at runtime.
+RUN cd /opt/hermes-agent && \
+    npm install --workspace ui-tui --include=dev --no-fund --no-audit --progress=false && \
+    cd ui-tui && npm run build && \
+    test -f /opt/hermes-agent/ui-tui/dist/entry.js && npm cache clean --force
+ENV HERMES_TUI_DIR=/opt/hermes-agent/ui-tui
+
+# --- unprivileged runtime user ------------------------------------------------
+RUN useradd --create-home --uid 10001 --shell /bin/bash agent && \
+    install -d -o agent -g agent /workspace
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/hermes-agent-entrypoint
+
+USER agent
+ENV HOME=/home/agent \
+    HERMES_HOME=/home/agent/.hermes \
+    PORT=8080
+WORKDIR /workspace
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/hermes-agent-entrypoint"]

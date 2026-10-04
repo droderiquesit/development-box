@@ -1,0 +1,75 @@
+<section class="card">
+  <div class="flex flex-wrap items-start gap-3">
+    <div class="min-w-0 flex-1">
+      <h1 class="truncate text-lg font-semibold tracking-tight">{{ run.repo }}</h1>
+      <div class="text-xs text-slate-500">base {{ run.base_branch }} &middot; up to {{ run.max_agents }} agents &middot; by {{ run.created_by }}</div>
+    </div>
+    <span class="pill pill-{{ tone(run.status) }}" id="run-status">{{ run.status|label }}</span>
+  </div>
+  <div class="mt-4 flex items-center gap-3">
+    <progress class="bar" max="100" value="{{ run.progress.percent }}">{{ run.progress.percent }}%</progress>
+    <span class="shrink-0 text-xs tabular-nums text-slate-500">{{ run.progress.done }}/{{ run.progress.total }} done</span>
+  </div>
+  <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+    <span>planner {{ run.usage.planner.prompt_tokens + run.usage.planner.completion_tokens }} tok</span>
+    <span>workers {{ run.usage.workers.prompt_tokens + run.usage.workers.completion_tokens }} tok</span>
+    <span>reviewer {{ run.usage.reviewer.prompt_tokens + run.usage.reviewer.completion_tokens }} tok</span>
+  </div>
+  {% if run.error %}<div class="alert mt-3">{{ run.error }}</div>{% endif %}
+  {% if run.status == "planning" %}<p class="mt-3 text-sm text-slate-500"><span class="spinner"></span> The architect is planning&hellip;</p>{% endif %}
+  <div class="mt-4 flex flex-wrap gap-2">
+    {% if run.status == "awaiting_approval" %}
+    <button class="btn btn-primary" hx-post="/api/runs/{{ run.id }}/approve" hx-swap="none">Approve plan &amp; start</button>
+    {% endif %}
+    {% if run.status in ("planning", "awaiting_approval", "running") %}
+    <button class="btn btn-danger" hx-post="/api/runs/{{ run.id }}/cancel" hx-swap="none" hx-confirm="Cancel this run and stop its workers?">Cancel run</button>
+    {% endif %}
+  </div>
+</section>
+
+{% if run.plan %}
+<section class="mt-4">
+  <h2 class="mb-1 px-1 text-sm font-semibold uppercase tracking-wide text-slate-500">Plan</h2>
+  <p class="mb-3 px-1 text-sm">{{ run.plan.summary }}</p>
+  <div class="space-y-3" id="tasks">
+    {% for t in run.tasks %}
+    <article class="card" id="task-{{ t.id }}">
+      <div class="flex items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="font-medium">{{ t.title }}</div>
+          <div class="text-xs text-slate-500"><code>{{ t.id }}</code>{% if t.depends_on %} &middot; after {{ t.depends_on|join(", ") }}{% endif %}{% if t.attempts %} &middot; attempt {{ t.attempts }}{% endif %}</div>
+        </div>
+        <span class="pill pill-{{ tone(t.status) }}">{{ t.status|label }}</span>
+      </div>
+      <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">{{ t.description }}</p>
+      <ul class="mt-2 list-inside list-disc text-sm text-slate-600 dark:text-slate-400">
+        {% for a in t.acceptance %}<li>{{ a }}</li>{% endfor %}
+      </ul>
+      {% if t.error %}<div class="alert mt-2 text-xs">{{ t.error }}</div>{% endif %}
+      {% if t.review %}
+      <details class="mt-3 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-900">
+        <summary class="cursor-pointer">Review <span class="pill pill-{{ tone(t.review.verdict) }}">{{ t.review.verdict|label }}</span></summary>
+        <p class="mt-2">{{ t.review.summary }}</p>
+        <ul class="mt-1 space-y-1">
+          {% for f in t.review.findings %}<li><span class="pill pill-muted">{{ f.severity }}</span> {% if f.file %}<code>{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}</code> {% endif %}{{ f.message }}</li>{% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+      {% if t.log_tail %}
+      <details class="mt-2 text-sm">
+        <summary class="cursor-pointer text-slate-500">Log</summary>
+        <pre class="mt-2 max-h-64 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">{{ t.log_tail|join("\n") }}</pre>
+      </details>
+      {% endif %}
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        {% if t.pr_url %}<a href="{{ t.pr_url }}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary">Open PR &#8599;</a>{% endif %}
+        {% if t.status in ("pr_open", "reviewed") %}
+        <button class="btn btn-primary" hx-post="/api/runs/{{ run.id }}/tasks/{{ t.id }}/merge" hx-swap="none"
+                hx-confirm="Squash-merge {{ t.pr_url }}?">Merge</button>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
