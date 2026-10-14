@@ -242,7 +242,7 @@ jobs:
             --format sarif --output trivy-image.sarif \
             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0
 
-      - uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         # Only upload if a scan actually produced a file; `always()` on its own
         # turns one failure into two and buries the real error.
         if: always() && hashFiles('trivy-image.sarif') != ''
@@ -257,14 +257,14 @@ jobs:
           category: trivy-image
 
       - name: keep the SARIF regardless
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && hashFiles('trivy-image.sarif') != ''
         with:
           name: trivy-image-sarif
           path: trivy-image.sarif
           retention-days: 30
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: devbox-sbom
           path: sbom/
